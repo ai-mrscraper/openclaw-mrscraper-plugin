@@ -2,6 +2,8 @@
 
 Community plugin that adds a MrScraper `web_fetch` fallback and tools for rendered page fetches, AI scraping, reruns, and saved results. It sends target URLs and extraction requests to MrScraper's hosted APIs. A MrScraper account and API token are required.
 
+The existing [MrScraper ClawHub skill](https://clawhub.ai/ai-mrscraper/skills/mrscraper) provides agent instructions for direct API use. This package registers native OpenClaw tools and a `web_fetch` provider. It is community-maintained and is not an official OpenClaw plugin.
+
 ## Install
 
 After publication on ClawHub:
