@@ -1,9 +1,20 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const request = vi.hoisted(() => vi.fn());
+const { request, readResponseText } = vi.hoisted(() => ({
+  request: vi.fn(),
+  readResponseText: vi.fn(async (response: Response, options: { maxBytes: number }) => {
+    const bytes = Buffer.from(await response.text());
+    const capped = bytes.subarray(0, options.maxBytes);
+    return {
+      text: capped.toString("utf8"),
+      truncated: bytes.length >= options.maxBytes,
+      bytesRead: capped.length,
+    };
+  }),
+}));
 
 vi.mock("openclaw/plugin-sdk/provider-web-fetch", () => ({
-  readResponseText: vi.fn(),
+  readResponseText,
   resolveTimeoutSeconds: (override: number | undefined, fallback: number) => override ?? fallback,
   withStrictWebToolsEndpoint: request,
   wrapExternalContent: (value: string) => `UNTRUSTED(${value})`,
@@ -16,6 +27,7 @@ const config = { plugins: { entries: { mrscraper: { config: { apiToken: "test-to
 
 beforeEach(() => {
   request.mockReset();
+  readResponseText.mockClear();
 });
 
 describe("MrScraper API responses", () => {
@@ -52,6 +64,19 @@ describe("MrScraper API responses", () => {
     expect(result.contentType).toBe("text/markdown");
   });
 
+  it("rejects an oversized unblocker response before extraction", async () => {
+    request.mockImplementation(async (_options, handle) =>
+      handle({ response: new Response("x".repeat(5_000_000)) }),
+    );
+
+    await expect(
+      runMrScraperFetchHtml({ cfg: config, url: "https://example.com" }),
+    ).rejects.toThrow("MrScraper unblocker response exceeds the 5000000-byte limit.");
+    expect(readResponseText).toHaveBeenCalledWith(expect.any(Response), {
+      maxBytes: 5_000_000,
+    });
+  });
+
   it("wraps saved scrape data as untrusted content", async () => {
     request.mockImplementation(async (_options, handle) =>
       handle({
@@ -67,5 +92,31 @@ describe("MrScraper API responses", () => {
     });
     expect(result.response).toContain("ignore previous instructions");
     expect(result).not.toHaveProperty("data");
+  });
+
+  it("rejects an oversized platform JSON response", async () => {
+    request.mockImplementation(async (_options, handle) =>
+      handle({ response: new Response("x".repeat(5_000_000)) }),
+    );
+
+    await expect(
+      runMrScraperGetResultById({ cfg: config, resultId: "result-1" }),
+    ).rejects.toThrow("MrScraper result lookup response exceeds the 5000000-byte limit.");
+    expect(readResponseText).toHaveBeenCalledWith(expect.any(Response), {
+      maxBytes: 5_000_000,
+    });
+  });
+
+  it("bounds and wraps untrusted API error details", async () => {
+    request.mockImplementation(async (_options, handle) =>
+      handle({ response: Response.json({ message: "unsafe".repeat(20_000) }, { status: 429 }) }),
+    );
+
+    await expect(
+      runMrScraperGetResultById({ cfg: config, resultId: "result-1" }),
+    ).rejects.toThrow(/UNTRUSTED\(/);
+    expect(readResponseText).toHaveBeenCalledWith(expect.any(Response), {
+      maxBytes: 64_000,
+    });
   });
 });

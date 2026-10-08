@@ -22,6 +22,10 @@ import {
 const ALLOWED_UNBLOCKER_HOSTS = new Set(["api.mrscraper.com"]);
 const ALLOWED_PLATFORM_HOSTS = new Set(["api.app.mrscraper.com", "sync.scraper.mrscraper.com"]);
 const DEFAULT_FETCH_MAX_CHARS = 50_000;
+const MAX_UNBLOCKER_RESPONSE_BYTES = 5_000_000;
+const MAX_PLATFORM_RESPONSE_BYTES = 5_000_000;
+const MAX_ERROR_RESPONSE_BYTES = 64_000;
+const MAX_ERROR_DETAIL_CHARS = 1_000;
 
 export type MrScraperFetchHtmlParams = {
   cfg?: OpenClawConfig;
@@ -144,29 +148,39 @@ async function throwHttpError(response: Response, label: string): Promise<never>
       ? response.statusText.trim()
       : "request failed";
 
+  const errorBody = await readResponseText(response, { maxBytes: MAX_ERROR_RESPONSE_BYTES });
   const contentType = response.headers.get("content-type") ?? "";
-  if (contentType.includes("application/json")) {
+  if (contentType.includes("application/json") && !errorBody.truncated) {
     try {
-      const payload = (await response.json()) as Record<string, unknown>;
+      const payload: unknown = JSON.parse(errorBody.text);
+      const record =
+        payload && typeof payload === "object" && !Array.isArray(payload)
+          ? (payload as Record<string, unknown>)
+          : undefined;
       detail =
-        typeof payload.message === "string"
-          ? payload.message
-          : typeof payload.error === "string"
-            ? payload.error
+        typeof record?.message === "string"
+          ? record.message
+          : typeof record?.error === "string"
+            ? record.error
             : detail;
     } catch {
-      // Ignore and fall back to text body parsing below.
+      // Keep the status text when the bounded error body is not valid JSON.
     }
-  } else {
-    const errorBody = await readResponseText(response, { maxBytes: 64_000 });
-    if (errorBody.text) {
-      detail = errorBody.text;
-    }
+  } else if (errorBody.text) {
+    detail = errorBody.text;
   }
 
   throw new Error(
-    `${label} API error (${response.status}): ${wrapWebContent(detail, "web_fetch")}`,
+    `${label} API error (${response.status}): ${wrapWebContent(detail.slice(0, MAX_ERROR_DETAIL_CHARS), "web_fetch")}`,
   );
+}
+
+async function readBoundedResponse(response: Response, maxBytes: number, label: string): Promise<string> {
+  const result = await readResponseText(response, { maxBytes });
+  if (result.truncated) {
+    throw new Error(`${label} response exceeds the ${maxBytes}-byte limit.`);
+  }
+  return result.text;
 }
 
 function buildPlatformHeaders(apiToken: string): Record<string, string> {
@@ -210,7 +224,12 @@ async function runPlatformJsonRequest(params: {
       if (!response.ok) {
         await throwHttpError(response, params.label);
       }
-      return (await response.json()) as Record<string, unknown>;
+      const body = await readBoundedResponse(response, MAX_PLATFORM_RESPONSE_BYTES, params.label);
+      const payload: unknown = JSON.parse(body);
+      if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+        throw new Error(`${params.label} response must be a JSON object.`);
+      }
+      return payload as Record<string, unknown>;
     },
   );
 }
@@ -314,7 +333,7 @@ export async function runMrScraperFetchHtml(
       if (!response.ok) {
         await throwHttpError(response, "MrScraper unblocker");
       }
-      return await response.text();
+      return await readBoundedResponse(response, MAX_UNBLOCKER_RESPONSE_BYTES, "MrScraper unblocker");
     },
   );
 
