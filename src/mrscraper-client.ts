@@ -20,7 +20,7 @@ import {
 } from "./config.js";
 
 const ALLOWED_UNBLOCKER_HOSTS = new Set(["api.mrscraper.com"]);
-const ALLOWED_PLATFORM_HOSTS = new Set(["api.app.mrscraper.com", "sync.scraper.mrscraper.com"]);
+const ALLOWED_PLATFORM_HOSTS = new Set(["api.app.mrscraper.com"]);
 const DEFAULT_FETCH_MAX_CHARS = 50_000;
 const MAX_UNBLOCKER_RESPONSE_BYTES = 5_000_000;
 const MAX_PLATFORM_RESPONSE_BYTES = 5_000_000;

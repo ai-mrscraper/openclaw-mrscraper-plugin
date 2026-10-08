@@ -94,6 +94,26 @@ describe("MrScraper API responses", () => {
     expect(result).not.toHaveProperty("data");
   });
 
+  it("rejects a platform API host that does not serve these endpoints", async () => {
+    const cfg = {
+      plugins: {
+        entries: {
+          mrscraper: {
+            config: {
+              apiToken: "test-token",
+              platform: { baseUrl: "https://sync.scraper.mrscraper.com" },
+            },
+          },
+        },
+      },
+    };
+
+    await expect(runMrScraperGetResultById({ cfg, resultId: "result-1" })).rejects.toThrow(
+      "MrScraper platform baseUrl host is not allowed",
+    );
+    expect(request).not.toHaveBeenCalled();
+  });
+
   it("rejects an oversized platform JSON response", async () => {
     request.mockImplementation(async (_options, handle) =>
       handle({ response: new Response("x".repeat(5_000_000)) }),

@@ -100,13 +100,7 @@ export function resolveMrScraperPlatformBaseUrl(cfg?: OpenClawConfig): string {
   return configured || DEFAULT_MRSCRAPER_PLATFORM_BASE_URL;
 }
 
-export function resolveMrScraperFetchTimeoutSeconds(
-  cfg?: OpenClawConfig,
-  override?: number,
-): number {
-  if (typeof override === "number" && Number.isFinite(override) && override > 0) {
-    return Math.floor(override);
-  }
+export function resolveMrScraperFetchTimeoutSeconds(cfg?: OpenClawConfig): number {
   const configured = resolveMrScraperWebFetchConfig(cfg)?.timeoutSeconds;
   if (typeof configured === "number" && Number.isFinite(configured) && configured > 0) {
     return Math.floor(configured);
@@ -114,13 +108,7 @@ export function resolveMrScraperFetchTimeoutSeconds(
   return DEFAULT_MRSCRAPER_FETCH_TIMEOUT_SECONDS;
 }
 
-export function resolveMrScraperScrapeTimeoutSeconds(
-  cfg?: OpenClawConfig,
-  override?: number,
-): number {
-  if (typeof override === "number" && Number.isFinite(override) && override > 0) {
-    return Math.floor(override);
-  }
+export function resolveMrScraperScrapeTimeoutSeconds(cfg?: OpenClawConfig): number {
   const configured = resolveMrScraperPlatformConfig(cfg)?.timeoutSeconds;
   if (typeof configured === "number" && Number.isFinite(configured) && configured > 0) {
     return Math.floor(configured);
