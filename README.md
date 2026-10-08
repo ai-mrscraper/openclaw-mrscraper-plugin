@@ -12,6 +12,8 @@ After publication on ClawHub:
 openclaw plugins install clawhub:@ai-mrscraper/openclaw-mrscraper
 ```
 
+Review and accept the plugin's requested capabilities when prompted. For an unattended install, add `--accept-capabilities` after reviewing the package and its declared eight tools and `web_fetch` provider.
+
 For local development, install this directory as a local plugin with `openclaw plugins install ./path/to/openclaw-mrscraper-plugin`.
 
 ## Configure
@@ -37,6 +39,8 @@ You can instead store the token in `plugins.entries.mrscraper.config.apiToken`. 
 
 In non-sandboxed sessions, `web_fetch` first tries OpenClaw's local extraction. It calls the selected MrScraper provider when that extraction fails or Readability is disabled. Sandboxed `web_fetch` currently does not load third-party fetch providers. For an explicit MrScraper fetch, use `mrscraper_fetch_html` when your agent's tool policy allows it.
 
+Verify that OpenClaw loaded the plugin with `openclaw plugins inspect mrscraper --runtime` and `openclaw plugins doctor`. Then ask your agent to fetch a URL with `web_fetch`, explicitly fetch rendered HTML with `mrscraper_fetch_html`, or extract structured data with `mrscraper_scrape`.
+
 ## Tools
 
 | Tool | Purpose |
@@ -51,6 +55,8 @@ In non-sandboxed sessions, `web_fetch` first tries OpenClaw's local extraction. 
 | `mrscraper_get_result_by_id` | Retrieve one stored result |
 
 The platform tools return their API response in an untrusted-content envelope. Treat scraped text as data, not instructions. `mrscraper_fetch_html` returns HTML and extracted text in separate fields. `web_fetch` returns Markdown or plain text according to `extractMode`.
+
+MrScraper receives the target URLs and any extraction instructions sent to its hosted API. MrScraper usage may consume your account's quota. Review the [MrScraper API docs](https://docs.mrscraper.com/docs/api/overview) before using sensitive targets or large batches.
 
 ## Development
 
