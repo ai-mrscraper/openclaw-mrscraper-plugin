@@ -10,7 +10,7 @@
       "label": "MrScraper API Token",
       "help": "MrScraper API token for unblocker and scraper APIs (fallback: MRSCRAPER_API_TOKEN env var).",
       "sensitive": true,
-      "placeholder": "mrs_..."
+      "placeholder": "atk_..."
     },
     "webFetch.baseUrl": {
       "label": "MrScraper Unblocker Base URL",
