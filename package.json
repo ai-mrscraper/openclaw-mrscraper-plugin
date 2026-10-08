@@ -3,13 +3,11 @@
   "version": "0.1.0",
   "description": "MrScraper web fetch provider and scraping tools for OpenClaw",
   "type": "module",
+  "main": "./dist/index.js",
   "license": "MIT",
   "files": [
-    "index.ts",
+    "dist/**/*.js",
     "openclaw.plugin.json",
-    "src/**/*.ts",
-    "!src/**/*.test.ts",
-    "src/**/*.d.ts",
     "skills/**",
     "README.md",
     "LICENSE"
@@ -30,11 +28,12 @@
   },
   "scripts": {
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "build": "tsc -p tsconfig.build.json"
   },
   "openclaw": {
     "extensions": [
-      "./index.ts"
+      "./dist/index.js"
     ],
     "compat": {
       "pluginApi": ">=2026.9.8",

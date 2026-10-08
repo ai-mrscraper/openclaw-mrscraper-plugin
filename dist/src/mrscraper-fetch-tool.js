@@ -1,0 +1,43 @@
+import { Type } from "@sinclair/typebox";
+import { jsonResult, readNumberParam, readStringParam, } from "openclaw/plugin-sdk/provider-web-fetch";
+import { runMrScraperFetchHtml } from "./mrscraper-client.js";
+const MrScraperFetchHtmlSchema = Type.Object({
+    url: Type.String({ description: "HTTP or HTTPS URL to fetch through MrScraper." }),
+    maxChars: Type.Optional(Type.Number({
+        description: "Maximum characters to return.",
+        minimum: 100,
+    })),
+    timeoutSeconds: Type.Optional(Type.Number({
+        description: "Timeout in seconds for the unblocker request.",
+        minimum: 1,
+    })),
+    geoCode: Type.Optional(Type.String({
+        description: "Optional country code for routed unblocker traffic, for example SG or US.",
+    })),
+    blockResources: Type.Optional(Type.Boolean({
+        description: "Block images, fonts, and similar resources to speed up fetches.",
+    })),
+}, { additionalProperties: false });
+export function createMrScraperFetchHtmlTool(api) {
+    return {
+        name: "mrscraper_fetch_html",
+        label: "MrScraper Fetch HTML",
+        description: "Open a page through MrScraper's unblocker and return the rendered HTML plus extracted text.",
+        parameters: MrScraperFetchHtmlSchema,
+        execute: async (_toolCallId, rawParams) => {
+            const url = readStringParam(rawParams, "url", { required: true });
+            const maxChars = readNumberParam(rawParams, "maxChars", { integer: true });
+            const timeoutSeconds = readNumberParam(rawParams, "timeoutSeconds", { integer: true });
+            const geoCode = readStringParam(rawParams, "geoCode");
+            const blockResources = typeof rawParams.blockResources === "boolean" ? rawParams.blockResources : undefined;
+            return jsonResult(await runMrScraperFetchHtml({
+                cfg: api.config,
+                url,
+                maxChars,
+                timeoutSeconds,
+                geoCode,
+                blockResources,
+            }));
+        },
+    };
+}

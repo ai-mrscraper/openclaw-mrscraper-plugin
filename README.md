@@ -58,6 +58,7 @@ The platform tools return their API response in an untrusted-content envelope. T
 pnpm install
 pnpm test
 pnpm typecheck
+pnpm build
 ```
 
 To preview a ClawHub publication without uploading:
