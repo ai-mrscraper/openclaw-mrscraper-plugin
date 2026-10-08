@@ -10,7 +10,7 @@ Some users need rendered content from pages that defeat plain HTTP fetching, plu
 
 ## Proposed solution
 
-1. We will publish and maintain `@mrscraper/openclaw-plugin` as a public-source ClawHub package first, with install instructions, API-token handling, tests, and a demonstrated install through the published package. The ClawHub skill remains a separate skill listing.
+1. We will publish and maintain `@ai-mrscraper/openclaw-mrscraper` as a public-source ClawHub package first, with install instructions, API-token handling, tests, and a demonstrated install through the published package. The [source repository](https://github.com/ai-mrscraper/openclaw-mrscraper-plugin) is public. The ClawHub skill remains a separate skill listing.
 2. After that evidence is available, please decide whether MrScraper qualifies for an official or verified plugin path that permits sandboxed `web_fetch`. We are asking for a product and security review, not claiming that ClawHub publication itself grants official status. If that route is unsuitable, please identify a generic SDK or trust-boundary gap that would be useful to address instead.
 3. Only if OpenClaw adopts the integration, we would propose a focused tool guide covering installation, provider selection, dedicated tools, data sent to MrScraper, API-key storage, and sandbox limitations, with accurate links from the web-fetch and web-tool pages. The plugin would remain maintained in its own repository unless maintainers explicitly request otherwise.
 
@@ -29,7 +29,8 @@ Affected users are those who fetch pages requiring rendering or bot protection a
 - [Current MrScraper skill on ClawHub](https://clawhub.ai/ai-mrscraper/skills/mrscraper), published under `@ai-mrscraper` (a skill, not a native plugin package); [third-party listing](https://clawbot.ai/skills/mrscraper.html).
 - [Earlier bundled-plugin PR and closure](https://github.com/openclaw/openclaw/pull/63668).
 - [OpenClaw web provider rules](https://docs.openclaw.ai/tools/web), [community plugin policy](https://docs.openclaw.ai/plugins/community), and [project vision](https://github.com/openclaw/openclaw/blob/main/VISION.md).
-- Public source, published package link, package-install smoke test, and user reports: to be added before filing this request.
+- [Public plugin source](https://github.com/ai-mrscraper/openclaw-mrscraper-plugin): 17 tests pass and ClawHub's isolated runtime validator reports zero findings against OpenClaw 2026.9.8.
+- Published package link, package-install smoke test, and user reports: to be added before filing this request.
 
 ## Do you plan to open a PR for this?
 
