@@ -1,0 +1,52 @@
+{
+  "name": "@ai-mrscraper/openclaw-mrscraper",
+  "version": "0.1.0",
+  "description": "MrScraper web fetch provider and scraping tools for OpenClaw",
+  "type": "module",
+  "license": "MIT",
+  "files": [
+    "index.ts",
+    "openclaw.plugin.json",
+    "src/**/*.ts",
+    "!src/**/*.test.ts",
+    "src/**/*.d.ts",
+    "skills/**",
+    "README.md",
+    "LICENSE"
+  ],
+  "dependencies": {
+    "@sinclair/typebox": "^0.34.49",
+    "turndown": "^7.2.0"
+  },
+  "peerDependencies": {
+    "openclaw": ">=2026.9.8"
+  },
+  "devDependencies": {
+    "@types/turndown": "^5.0.5",
+    "openclaw": "2026.9.8",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.2",
+    "@types/node": "^22.0.0"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ],
+    "compat": {
+      "pluginApi": ">=2026.9.8",
+      "minGatewayVersion": "2026.9.8"
+    },
+    "install": {
+      "clawhubSpec": "@ai-mrscraper/openclaw-mrscraper",
+      "minHostVersion": ">=2026.9.8"
+    },
+    "build": {
+      "openclawVersion": "2026.9.8",
+      "pluginSdkVersion": "2026.9.8"
+    }
+  }
+}
