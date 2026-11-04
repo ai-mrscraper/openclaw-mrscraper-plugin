@@ -1,7 +1,7 @@
 import { Type } from "@sinclair/typebox";
-import type { OpenClawConfig } from "openclaw/plugin-sdk/config-runtime";
 import type { WebFetchProviderPlugin } from "openclaw/plugin-sdk/provider-web-fetch";
 import { enablePluginInConfig } from "openclaw/plugin-sdk/provider-web-fetch";
+import { readMrScraperConfiguredApiToken, writeMrScraperConfiguredApiToken } from "./config.js";
 import { runMrScraperFetchHtml } from "./mrscraper-client.js";
 
 const MrScraperWebFetchSchema = Type.Object(
@@ -15,13 +15,13 @@ const MrScraperWebFetchSchema = Type.Object(
     ),
     timeoutSeconds: Type.Optional(
       Type.Number({
-        description: "Timeout in seconds for the unblocker request.",
+        description: "Timeout in seconds for the fetch request.",
         minimum: 1,
       }),
     ),
     geoCode: Type.Optional(
       Type.String({
-        description: "Optional country code for routed unblocker traffic, for example SG or US.",
+        description: "Optional country to load the page from, for example SG or US.",
       }),
     ),
     blockResources: Type.Optional(
@@ -33,16 +33,11 @@ const MrScraperWebFetchSchema = Type.Object(
   { additionalProperties: false },
 );
 
-function readConfiguredCredential(config?: OpenClawConfig): unknown {
-  return (config?.plugins?.entries?.mrscraper?.config as { apiToken?: unknown } | undefined)
-    ?.apiToken;
-}
-
 export function createMrScraperWebFetchProvider(): WebFetchProviderPlugin {
   return {
     id: "mrscraper",
     label: "MrScraper",
-    hint: "Fetch blocked pages with a stealth browser and IP rotation.",
+    hint: "Fetch rendered pages through MrScraper.",
     envVars: ["MRSCRAPER_API_TOKEN"],
     placeholder: "atk_...",
     signupUrl: "https://mrscraper.com/",
@@ -67,21 +62,11 @@ export function createMrScraperWebFetchProvider(): WebFetchProviderPlugin {
       current.apiToken = value;
       fetchConfigTarget.mrscraper = current;
     },
-    getConfiguredCredentialValue: (config) => readConfiguredCredential(config),
-    setConfiguredCredentialValue: (configTarget, value) => {
-      const plugins = (configTarget.plugins ??= {});
-      const entries = (plugins.entries ??= {});
-      const entry = (entries.mrscraper ??= {});
-      const pluginConfig =
-        entry.config && typeof entry.config === "object" && !Array.isArray(entry.config)
-          ? entry.config
-          : ((entry.config = {}), entry.config);
-      pluginConfig.apiToken = value;
-    },
+    getConfiguredCredentialValue: readMrScraperConfiguredApiToken,
+    setConfiguredCredentialValue: writeMrScraperConfiguredApiToken,
     applySelectionConfig: (config) => enablePluginInConfig(config, "mrscraper").config,
     createTool: ({ config }) => ({
-      description:
-        "Fetch a page through MrScraper's unblocker. Helpful for JS-heavy or bot-protected pages.",
+      description: "Fetch a page through MrScraper. Helpful for JavaScript-heavy pages.",
       parameters: MrScraperWebFetchSchema,
       execute: async (args) =>
         await runMrScraperFetchHtml({

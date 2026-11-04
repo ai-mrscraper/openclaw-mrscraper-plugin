@@ -4,14 +4,16 @@ import {
   DEFAULT_MRSCRAPER_FETCH_TIMEOUT_SECONDS,
   DEFAULT_MRSCRAPER_PLATFORM_BASE_URL,
   DEFAULT_MRSCRAPER_SCRAPE_TIMEOUT_SECONDS,
-  DEFAULT_MRSCRAPER_UNBLOCKER_BASE_URL,
+  DEFAULT_MRSCRAPER_SCRAPER_API_BASE_URL,
+  DEFAULT_MRSCRAPER_SEARCH_TIMEOUT_SECONDS,
   resolveMrScraperApiToken,
   resolveMrScraperBlockResources,
+  resolveMrScraperFetchBaseUrl,
   resolveMrScraperFetchTimeoutSeconds,
   resolveMrScraperPlatformBaseUrl,
   resolveMrScraperProxyCountry,
   resolveMrScraperScrapeTimeoutSeconds,
-  resolveMrScraperUnblockerBaseUrl,
+  resolveMrScraperSearchTimeoutSeconds,
 } from "./config.js";
 
 const {
@@ -23,6 +25,7 @@ const {
   runMrScraperGetResultById,
   runMrScraperRerunAiScraper,
   runMrScraperRerunManualScraper,
+  runMrScraperWebSearch,
 } = vi.hoisted(() => ({
   runMrScraperBulkRerunAiScraper: vi.fn(async (params: Record<string, unknown>) => params),
   runMrScraperBulkRerunManualScraper: vi.fn(async (params: Record<string, unknown>) => params),
@@ -32,6 +35,7 @@ const {
   runMrScraperGetResultById: vi.fn(async (params: Record<string, unknown>) => params),
   runMrScraperRerunAiScraper: vi.fn(async (params: Record<string, unknown>) => params),
   runMrScraperRerunManualScraper: vi.fn(async (params: Record<string, unknown>) => params),
+  runMrScraperWebSearch: vi.fn(async (params: Record<string, unknown>) => params),
 }));
 
 vi.mock("./mrscraper-client.js", async () => {
@@ -47,6 +51,7 @@ vi.mock("./mrscraper-client.js", async () => {
     runMrScraperGetResultById,
     runMrScraperRerunAiScraper,
     runMrScraperRerunManualScraper,
+    runMrScraperWebSearch,
   };
 });
 
@@ -61,6 +66,7 @@ describe("mrscraper tools", () => {
   let createMrScraperRerunManualScraperTool: typeof import("./mrscraper-rerun-manual-scraper-tool.js").createMrScraperRerunManualScraperTool;
   let createMrScraperScrapeTool: typeof import("./mrscraper-scrape-tool.js").createMrScraperScrapeTool;
   let mrscraperClientTesting: typeof import("./mrscraper-client.js").__testing;
+  let createMrScraperWebSearchProvider: typeof import("./mrscraper-search-provider.js").createMrScraperWebSearchProvider;
 
   beforeAll(async () => {
     ({ createMrScraperBulkRerunAiScraperTool } =
@@ -75,6 +81,7 @@ describe("mrscraper tools", () => {
     ({ createMrScraperRerunManualScraperTool } =
       await import("./mrscraper-rerun-manual-scraper-tool.js"));
     ({ createMrScraperScrapeTool } = await import("./mrscraper-scrape-tool.js"));
+    ({ createMrScraperWebSearchProvider } = await import("./mrscraper-search-provider.js"));
     ({ __testing: mrscraperClientTesting } =
       await vi.importActual<typeof import("./mrscraper-client.js")>("./mrscraper-client.js"));
   });
@@ -106,6 +113,8 @@ describe("mrscraper tools", () => {
     runMrScraperRerunManualScraper.mockImplementation(
       async (params: Record<string, unknown>) => params,
     );
+    runMrScraperWebSearch.mockReset();
+    runMrScraperWebSearch.mockImplementation(async (params: Record<string, unknown>) => params);
     vi.unstubAllEnvs();
   });
 
@@ -121,7 +130,7 @@ describe("mrscraper tools", () => {
     expect(applied.plugins?.entries?.mrscraper?.enabled).toBe(true);
   });
 
-  it("maps web_fetch provider args into MrScraper unblocker params", async () => {
+  it("maps web_fetch provider args into MrScraper fetch params", async () => {
     const provider = createMrScraperWebFetchProvider();
     const tool = provider.createTool({
       config: { test: true },
@@ -148,6 +157,40 @@ describe("mrscraper tools", () => {
       extractMode: "markdown",
     });
   });
+
+  it("stores the web_search credential where the plugin reads it and enables the plugin", () => {
+    const provider = createMrScraperWebSearchProvider();
+    const config = {} as OpenClawConfig;
+    provider.setConfiguredCredentialValue?.(config, "search-token");
+
+    expect(provider.getConfiguredCredentialValue?.(config)).toBe("search-token");
+    expect(resolveMrScraperApiToken(config)).toBe("search-token");
+    expect(provider.applySelectionConfig?.(config).plugins?.entries?.mrscraper?.enabled).toBe(true);
+  });
+
+  it.each([
+    [{ count: 3 }, { maxResults: 8 }, 3],
+    [{}, { maxResults: 8 }, 8],
+    [{}, undefined, 5],
+    [{ count: 50 }, undefined, 10],
+  ])(
+    "resolves the web_search count from args %j and search config %j to %i",
+    async (args, searchConfig, count) => {
+      const tool = createMrScraperWebSearchProvider().createTool({
+        config: { test: true },
+        searchConfig,
+      } as never);
+      if (!tool) {
+        throw new Error("Expected tool definition");
+      }
+
+      await tool.execute({ query: "mrscraper", ...args });
+
+      expect(runMrScraperWebSearch).toHaveBeenCalledWith(
+        expect.objectContaining({ cfg: { test: true }, query: "mrscraper", count }),
+      );
+    },
+  );
 
   it("normalizes explicit fetch-tool parameters", async () => {
     const tool = createMrScraperFetchHtmlTool({
@@ -367,6 +410,7 @@ describe("mrscraper tools", () => {
                 timeoutSeconds: 150,
                 proxyCountry: "SG",
               },
+              webSearch: { timeoutSeconds: 45 },
             },
           },
         },
@@ -374,23 +418,25 @@ describe("mrscraper tools", () => {
     } as OpenClawConfig;
 
     expect(resolveMrScraperApiToken(cfg)).toBe("plugin-token");
-    expect(resolveMrScraperUnblockerBaseUrl(cfg)).toBe("https://api.mrscraper.com");
+    expect(resolveMrScraperFetchBaseUrl(cfg)).toBe("https://api.mrscraper.com");
     expect(resolveMrScraperPlatformBaseUrl(cfg)).toBe("https://api.app.mrscraper.com");
     expect(resolveMrScraperFetchTimeoutSeconds(cfg)).toBe(75);
     expect(resolveMrScraperScrapeTimeoutSeconds(cfg)).toBe(150);
     expect(resolveMrScraperProxyCountry(cfg)).toBe("SG");
     expect(resolveMrScraperBlockResources(cfg)).toBe(true);
+    expect(resolveMrScraperSearchTimeoutSeconds(cfg)).toBe(45);
   });
 
   it("uses default config values when plugin config is missing", () => {
     vi.stubEnv("MRSCRAPER_API_TOKEN", "env-token");
 
     expect(resolveMrScraperApiToken()).toBe("env-token");
-    expect(resolveMrScraperUnblockerBaseUrl()).toBe(DEFAULT_MRSCRAPER_UNBLOCKER_BASE_URL);
+    expect(resolveMrScraperFetchBaseUrl()).toBe(DEFAULT_MRSCRAPER_SCRAPER_API_BASE_URL);
     expect(resolveMrScraperPlatformBaseUrl()).toBe(DEFAULT_MRSCRAPER_PLATFORM_BASE_URL);
     expect(resolveMrScraperFetchTimeoutSeconds()).toBe(DEFAULT_MRSCRAPER_FETCH_TIMEOUT_SECONDS);
     expect(resolveMrScraperScrapeTimeoutSeconds()).toBe(DEFAULT_MRSCRAPER_SCRAPE_TIMEOUT_SECONDS);
     expect(resolveMrScraperBlockResources()).toBe(false);
+    expect(resolveMrScraperSearchTimeoutSeconds()).toBe(DEFAULT_MRSCRAPER_SEARCH_TIMEOUT_SECONDS);
   });
 
   it("extracts useful text from rendered html", () => {
@@ -412,7 +458,7 @@ describe("mrscraper tools", () => {
         baseUrl: "https://api.mrscraper.com",
         defaultBaseUrl: "https://api.mrscraper.com",
         allowedHosts: new Set(["api.mrscraper.com"]),
-        product: "MrScraper unblocker",
+        product: "MrScraper fetch",
       }),
     ).toBe("https://api.mrscraper.com/");
 
@@ -421,8 +467,8 @@ describe("mrscraper tools", () => {
         baseUrl: "https://evil.example.com",
         defaultBaseUrl: "https://api.mrscraper.com",
         allowedHosts: new Set(["api.mrscraper.com"]),
-        product: "MrScraper unblocker",
+        product: "MrScraper fetch",
       }),
-    ).toThrow("MrScraper unblocker baseUrl host is not allowed");
+    ).toThrow("MrScraper fetch baseUrl host is not allowed");
   });
 });

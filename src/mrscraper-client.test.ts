@@ -21,7 +21,11 @@ vi.mock("openclaw/plugin-sdk/provider-web-fetch", () => ({
   wrapWebContent: (value: string) => `UNTRUSTED(${value})`,
 }));
 
-import { runMrScraperFetchHtml, runMrScraperGetResultById } from "./mrscraper-client.js";
+import {
+  runMrScraperFetchHtml,
+  runMrScraperGetResultById,
+  runMrScraperWebSearch,
+} from "./mrscraper-client.js";
 
 const config = { plugins: { entries: { mrscraper: { config: { apiToken: "test-token" } } } } };
 
@@ -31,7 +35,7 @@ beforeEach(() => {
 });
 
 describe("MrScraper API responses", () => {
-  it("sends the unblocker token in a header and respects text extraction", async () => {
+  it("sends the API token in a header and respects text extraction", async () => {
     request.mockImplementation(async (options, handle) =>
       handle({ response: new Response("<title>Example</title><p>Hello <b>world</b></p>") }),
     );
@@ -64,14 +68,14 @@ describe("MrScraper API responses", () => {
     expect(result.contentType).toBe("text/markdown");
   });
 
-  it("rejects an oversized unblocker response before extraction", async () => {
+  it("rejects an oversized fetch response before extraction", async () => {
     request.mockImplementation(async (_options, handle) =>
       handle({ response: new Response("x".repeat(5_000_000)) }),
     );
 
     await expect(
       runMrScraperFetchHtml({ cfg: config, url: "https://example.com" }),
-    ).rejects.toThrow("MrScraper unblocker response exceeds the 5000000-byte limit.");
+    ).rejects.toThrow("response exceeds the 5000000-byte limit.");
     expect(readResponseText).toHaveBeenCalledWith(expect.any(Response), {
       maxBytes: 5_000_000,
     });
@@ -138,5 +142,103 @@ describe("MrScraper API responses", () => {
     expect(readResponseText).toHaveBeenCalledWith(expect.any(Response), {
       maxBytes: 64_000,
     });
+  });
+});
+
+describe("MrScraper web search", () => {
+  const searchResponse = (data: unknown[]) =>
+    Response.json({ success: true, message: "Search completed", data, tokenUsage: 10 });
+
+  it("posts a websearch action and returns wrapped results trimmed to count", async () => {
+    request.mockImplementation(async (_options, handle) =>
+      handle({
+        response: searchResponse([
+          { rank: 1, title: "First", url: "https://www.example.com/a", description: "One" },
+          { rank: 2, title: "No link", description: "Dropped" },
+          { rank: 3, title: "Second", url: "https://example.org/b", description: "" },
+          { rank: 4, title: "Third", url: "https://example.net/c", description: "Three" },
+        ]),
+      }),
+    );
+
+    const result = await runMrScraperWebSearch({
+      cfg: config,
+      query: "  mrscraper  ",
+      count: 2,
+      country: "GB",
+    });
+
+    const options = request.mock.calls[0]?.[0];
+    expect(options.url).toBe("https://api.mrscraper.com/");
+    expect(options.init.method).toBe("POST");
+    expect(options.init.headers["x-api-token"]).toBe("test-token");
+    expect(JSON.parse(options.init.body)).toEqual({
+      action: "websearch",
+      query: "mrscraper",
+      numResults: 10,
+      country: "gb",
+    });
+    expect(result).toMatchObject({
+      query: "mrscraper",
+      provider: "mrscraper",
+      count: 2,
+      tokenUsage: 10,
+      externalContent: { untrusted: true, source: "web_search", wrapped: true },
+      results: [
+        {
+          title: "UNTRUSTED(First)",
+          url: "https://www.example.com/a",
+          snippet: "UNTRUSTED(One)",
+          siteName: "www.example.com",
+        },
+        { title: "UNTRUSTED(Second)", url: "https://example.org/b", snippet: "", siteName: "example.org" },
+      ],
+    });
+    expect(result.results).toHaveLength(2);
+  });
+
+  it.each([
+    [undefined, 10],
+    [3, 10],
+    [40, 40],
+    [250, 100],
+  ])("asks the API for numResults within 10-100 when count is %s", async (count, numResults) => {
+    request.mockImplementation(async (_options, handle) => handle({ response: searchResponse([]) }));
+
+    await runMrScraperWebSearch({ cfg: config, query: "q", count });
+
+    expect(JSON.parse(request.mock.calls[0]?.[0].init.body).numResults).toBe(numResults);
+  });
+
+  it("prefers the requested country over the configured one", async () => {
+    request.mockImplementation(async (_options, handle) => handle({ response: searchResponse([]) }));
+    const cfg = {
+      plugins: {
+        entries: { mrscraper: { config: { apiToken: "test-token", webSearch: { country: "ID" } } } },
+      },
+    };
+
+    await runMrScraperWebSearch({ cfg, query: "q" });
+    await runMrScraperWebSearch({ cfg, query: "q", country: "us" });
+
+    expect(JSON.parse(request.mock.calls[0]?.[0].init.body).country).toBe("id");
+    expect(JSON.parse(request.mock.calls[1]?.[0].init.body).country).toBe("us");
+  });
+
+  it("rejects a country that is not a two-letter code before calling the API", async () => {
+    await expect(
+      runMrScraperWebSearch({ cfg: config, query: "q", country: "usa" }),
+    ).rejects.toThrow("two-letter code");
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it("reports an unsuccessful search instead of returning no results", async () => {
+    request.mockImplementation(async (_options, handle) =>
+      handle({ response: Response.json({ success: false, message: "Search unavailable" }) }),
+    );
+
+    await expect(runMrScraperWebSearch({ cfg: config, query: "q" })).rejects.toThrow(
+      "MrScraper web search failed: UNTRUSTED(Search unavailable)",
+    );
   });
 });

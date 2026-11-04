@@ -9,23 +9,32 @@ import {
 } from "openclaw/plugin-sdk/provider-web-fetch";
 import { normalizeSecretInput } from "openclaw/plugin-sdk/secret-input";
 import {
+  DEFAULT_MRSCRAPER_SCRAPER_API_BASE_URL,
   resolveMrScraperApiToken,
   resolveMrScraperBlockResources,
+  resolveMrScraperFetchBaseUrl,
   resolveMrScraperFetchTimeoutSeconds,
   resolveMrScraperGeoCode,
   resolveMrScraperPlatformBaseUrl,
   resolveMrScraperProxyCountry,
   resolveMrScraperScrapeTimeoutSeconds,
-  resolveMrScraperUnblockerBaseUrl,
+  resolveMrScraperSearchCountry,
+  resolveMrScraperSearchTimeoutSeconds,
 } from "./config.js";
 
-const ALLOWED_UNBLOCKER_HOSTS = new Set(["api.mrscraper.com"]);
+const ALLOWED_SCRAPER_API_HOSTS = new Set(["api.mrscraper.com"]);
 const ALLOWED_PLATFORM_HOSTS = new Set(["api.app.mrscraper.com"]);
 const DEFAULT_FETCH_MAX_CHARS = 50_000;
-const MAX_UNBLOCKER_RESPONSE_BYTES = 5_000_000;
+const MAX_FETCH_RESPONSE_BYTES = 5_000_000;
 const MAX_PLATFORM_RESPONSE_BYTES = 5_000_000;
 const MAX_ERROR_RESPONSE_BYTES = 64_000;
 const MAX_ERROR_DETAIL_CHARS = 1_000;
+const MAX_SEARCH_RESPONSE_BYTES = 1_000_000;
+// The API rejects numResults below 10, so smaller counts are trimmed locally.
+const MIN_SEARCH_RESULTS = 10;
+const MAX_SEARCH_RESULTS = 100;
+const SEARCH_COUNTRY_PATTERN = /^[a-z]{2}$/i;
+const WEB_SEARCH_ENDPOINT = `${DEFAULT_MRSCRAPER_SCRAPER_API_BASE_URL}/`;
 
 export type MrScraperFetchHtmlParams = {
   cfg?: OpenClawConfig;
@@ -35,6 +44,16 @@ export type MrScraperFetchHtmlParams = {
   geoCode?: string;
   blockResources?: boolean;
   extractMode?: "markdown" | "text";
+};
+
+export type MrScraperWebSearchParams = {
+  cfg?: OpenClawConfig;
+  query: string;
+  /** Results to return, 1 to 100. At least 10 are requested; extras are dropped. */
+  count?: number;
+  country?: string;
+  timeoutSeconds?: number;
+  signal?: AbortSignal;
 };
 
 export type MrScraperCreateAiScraperParams = {
@@ -302,10 +321,10 @@ export async function runMrScraperFetchHtml(
   const apiToken = requireMrScraperApiToken(params.cfg, "web_fetch (mrscraper)");
 
   const baseUrl = resolveEndpoint({
-    baseUrl: resolveMrScraperUnblockerBaseUrl(params.cfg),
+    baseUrl: resolveMrScraperFetchBaseUrl(params.cfg),
     defaultBaseUrl: "https://api.mrscraper.com",
-    allowedHosts: ALLOWED_UNBLOCKER_HOSTS,
-    product: "MrScraper unblocker",
+    allowedHosts: ALLOWED_SCRAPER_API_HOSTS,
+    product: "MrScraper fetch",
   });
   const timeoutSeconds = resolveTimeoutSeconds(
     params.timeoutSeconds,
@@ -331,9 +350,9 @@ export async function runMrScraperFetchHtml(
     },
     async ({ response }) => {
       if (!response.ok) {
-        await throwHttpError(response, "MrScraper unblocker");
+        await throwHttpError(response, "MrScraper fetch");
       }
-      return await readBoundedResponse(response, MAX_UNBLOCKER_RESPONSE_BYTES, "MrScraper unblocker");
+      return await readBoundedResponse(response, MAX_FETCH_RESPONSE_BYTES, "MrScraper fetch");
     },
   );
 
@@ -362,6 +381,124 @@ export async function runMrScraperFetchHtml(
       source: "web_fetch",
       includeWarning: false,
     }),
+  };
+}
+
+function resolveSearchCount(count?: number): number {
+  if (typeof count !== "number" || !Number.isFinite(count)) {
+    return MIN_SEARCH_RESULTS;
+  }
+  return Math.min(MAX_SEARCH_RESULTS, Math.max(1, Math.floor(count)));
+}
+
+function resolveSiteName(url: string): string | undefined {
+  try {
+    return new URL(url).hostname || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function normalizeSearchResult(item: unknown): Array<Record<string, unknown>> {
+  if (!item || typeof item !== "object" || Array.isArray(item)) {
+    return [];
+  }
+  const { title, url, description } = item as Record<string, unknown>;
+  const link = typeof url === "string" ? url.trim() : "";
+  if (!link) {
+    return [];
+  }
+  return [
+    {
+      title: typeof title === "string" && title.trim() ? wrapWebContent(title.trim(), "web_search") : "",
+      url: link,
+      snippet:
+        typeof description === "string" && description.trim()
+          ? wrapWebContent(description.trim(), "web_search")
+          : "",
+      siteName: resolveSiteName(link),
+    },
+  ];
+}
+
+export async function runMrScraperWebSearch(
+  params: MrScraperWebSearchParams,
+): Promise<Record<string, unknown>> {
+  const query = params.query.trim();
+  if (!query) {
+    throw new Error("MrScraper web search needs a query.");
+  }
+  const country = resolveMrScraperSearchCountry(params.cfg, params.country);
+  if (country && !SEARCH_COUNTRY_PATTERN.test(country)) {
+    throw new Error(
+      `MrScraper web search country must be a two-letter code such as us or gb, not "${country}".`,
+    );
+  }
+  const apiToken = requireMrScraperApiToken(params.cfg, "web_search (mrscraper)");
+  const count = resolveSearchCount(params.count);
+  const timeoutSeconds = resolveTimeoutSeconds(
+    params.timeoutSeconds,
+    resolveMrScraperSearchTimeoutSeconds(params.cfg),
+  );
+  const body: Record<string, unknown> = {
+    action: "websearch",
+    query,
+    numResults: Math.max(count, MIN_SEARCH_RESULTS),
+  };
+  if (country) {
+    body.country = country.toLowerCase();
+  }
+
+  const start = Date.now();
+  const payload = await withStrictWebToolsEndpoint(
+    {
+      url: WEB_SEARCH_ENDPOINT,
+      timeoutSeconds,
+      signal: params.signal,
+      init: { method: "POST", headers: buildPlatformHeaders(apiToken), body: JSON.stringify(body) },
+    },
+    async ({ response }) => {
+      if (!response.ok) {
+        await throwHttpError(response, "MrScraper web search");
+      }
+      const text = await readBoundedResponse(response, MAX_SEARCH_RESPONSE_BYTES, "MrScraper web search");
+      return JSON.parse(text) as unknown;
+    },
+  );
+
+  const record =
+    payload && typeof payload === "object" && !Array.isArray(payload)
+      ? (payload as Record<string, unknown>)
+      : undefined;
+  if (record?.success !== true) {
+    const detail =
+      typeof record?.message === "string"
+        ? record.message
+        : typeof record?.error === "string"
+          ? record.error
+          : "unexpected response";
+    throw new Error(
+      `MrScraper web search failed: ${wrapWebContent(detail.slice(0, MAX_ERROR_DETAIL_CHARS), "web_fetch")}`,
+    );
+  }
+  if (!Array.isArray(record.data)) {
+    throw new Error("MrScraper web search response has no results list.");
+  }
+
+  const results = record.data.flatMap(normalizeSearchResult).slice(0, count);
+  return {
+    query,
+    provider: "mrscraper",
+    count: results.length,
+    tookMs: Date.now() - start,
+    ...(typeof record.tokenUsage === "number" ? { tokenUsage: record.tokenUsage } : {}),
+    externalContent: {
+      untrusted: true,
+      source: "web_search",
+      provider: "mrscraper",
+      wrapped: true,
+    },
+    results,
   };
 }
 

@@ -29,11 +29,11 @@ declare module "openclaw/plugin-sdk/provider-web-fetch" {
   export function readResponseText(response: Response, options: { maxBytes: number }): Promise<{ text: string; truncated: boolean }>;
   export function resolveTimeoutSeconds(override: number | undefined, fallback: number): number;
   export function withStrictWebToolsEndpoint<T>(
-    options: { url: string; timeoutSeconds: number; init?: RequestInit },
+    options: { url: string; timeoutSeconds: number; init?: RequestInit; signal?: AbortSignal },
     run: (result: { response: Response; finalUrl: string }) => Promise<T>,
   ): Promise<T>;
   export function wrapExternalContent(content: string, options: { source: "web_fetch"; includeWarning?: boolean }): string;
-  export function wrapWebContent(content: string, source: "web_fetch"): string;
+  export function wrapWebContent(content: string, source: "web_fetch" | "web_search"): string;
   export function jsonResult(payload: unknown): { content: Array<{ type: "text"; text: string }>; details: unknown };
   export function readNumberParam(params: Record<string, unknown>, key: string, options?: { integer?: boolean }): number | undefined;
   export function readStringParam(params: Record<string, unknown>, key: string, options?: { required?: boolean }): string;

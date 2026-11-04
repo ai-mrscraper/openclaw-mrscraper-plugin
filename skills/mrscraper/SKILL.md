@@ -1,6 +1,6 @@
 ---
 name: mrscraper
-description: MrScraper unblocker and AI scraping tools for blocked pages and structured extraction.
+description: MrScraper web search, page fetch, and AI scraping tools for search results, rendered pages, and structured extraction.
 metadata:
   { "openclaw": { "emoji": "🕸️", "requires": { "config": ["plugins.entries.mrscraper.enabled"] } } }
 ---
@@ -11,8 +11,10 @@ metadata:
 
 | Need                              | Tool                                  | When                                                                |
 | --------------------------------- | ------------------------------------- | ------------------------------------------------------------------- |
-| Blocked or JS-heavy page fetch    | `web_fetch`                           | MrScraper can back up `web_fetch` in non-sandboxed sessions         |
-| Rendered HTML plus extracted text | `mrscraper_fetch_html`                | Need unblocker controls like `geoCode` or `blockResources`          |
+| Web search                        | `web_search`                          | MrScraper is the selected `web_search` provider                     |
+| Up to 100 search results          | `mrscraper_web_search`                | Need more than 10 results or a custom timeout                       |
+| JS-heavy page fetch               | `web_fetch`                           | MrScraper can back up `web_fetch` in non-sandboxed sessions         |
+| Rendered HTML plus extracted text | `mrscraper_fetch_html`                | Need controls like `geoCode` or `blockResources`                    |
 | AI-powered structured extraction  | `mrscraper_scrape`                    | Need schema-free extraction from plain-language instructions        |
 | Reuse an AI scraper               | `mrscraper_rerun_ai_scraper`          | Apply an existing AI scraper to a new page or crawl target          |
 | Batch AI reruns                   | `mrscraper_bulk_rerun_ai_scraper`     | Reuse one AI scraper across many URLs                               |
@@ -20,6 +22,28 @@ metadata:
 | Batch manual reruns               | `mrscraper_bulk_rerun_manual_scraper` | Reuse one manual scraper across many URLs                           |
 | Browse prior runs                 | `mrscraper_get_all_results`           | List stored results with sorting, paging, and filters               |
 | Inspect one prior run             | `mrscraper_get_result_by_id`          | Fetch one detailed result by result ID                              |
+
+## web_search
+
+When `mrscraper` is the selected `web_search` provider, `web_search` returns
+titles, URLs, and snippets from MrScraper.
+
+| Parameter | Description                               |
+| --------- | ----------------------------------------- |
+| `query`   | Search query                              |
+| `count`   | Results to return, 1 to 10                |
+| `country` | Two-letter country code like `us` or `gb` |
+
+## mrscraper_web_search
+
+Use this when you need more than 10 results or a custom timeout.
+
+| Parameter        | Description                               |
+| ---------------- | ----------------------------------------- |
+| `query`          | Search query                              |
+| `count`          | Results to return, 1 to 100 (default 10)  |
+| `country`        | Two-letter country code like `us` or `gb` |
+| `timeoutSeconds` | Request timeout                           |
 
 ## web_fetch
 
@@ -35,8 +59,8 @@ providers. Use `mrscraper_fetch_html` when the agent's tool policy allows it.
 
 ## mrscraper_fetch_html
 
-Use this when you need unblocker-specific controls or want both rendered HTML
-and extracted text back in one tool result.
+Use this when you need fetch controls like `geoCode` or `blockResources`, or
+want both rendered HTML and extracted text back in one tool result.
 
 | Parameter        | Description                                     |
 | ---------------- | ----------------------------------------------- |
@@ -129,6 +153,7 @@ Fetch one detailed result object by result ID.
 
 ## Tips
 
+- Use `web_search` or `mrscraper_web_search` to find pages, then fetch or scrape the ones you need.
 - Start with `web_fetch` in a non-sandboxed session or `mrscraper_fetch_html` when you mainly need page contents.
 - Use `mrscraper_scrape` when you need structured extracted data instead of raw page text.
 - Use the rerun tools once you already have a saved scraper ID and want to reuse it.

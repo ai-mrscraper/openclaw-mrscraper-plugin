@@ -18,13 +18,13 @@ const MrScraperFetchHtmlSchema = Type.Object(
     ),
     timeoutSeconds: Type.Optional(
       Type.Number({
-        description: "Timeout in seconds for the unblocker request.",
+        description: "Timeout in seconds for the fetch request.",
         minimum: 1,
       }),
     ),
     geoCode: Type.Optional(
       Type.String({
-        description: "Optional country code for routed unblocker traffic, for example SG or US.",
+        description: "Optional country to load the page from, for example SG or US.",
       }),
     ),
     blockResources: Type.Optional(
@@ -40,8 +40,7 @@ export function createMrScraperFetchHtmlTool(api: OpenClawPluginApi) {
   return {
     name: "mrscraper_fetch_html",
     label: "MrScraper Fetch HTML",
-    description:
-      "Open a page through MrScraper's unblocker and return the rendered HTML plus extracted text.",
+    description: "Open a page through MrScraper and return the rendered HTML plus extracted text.",
     parameters: MrScraperFetchHtmlSchema,
     execute: async (_toolCallId: string, rawParams: Record<string, unknown>) => {
       const url = readStringParam(rawParams, "url", { required: true });

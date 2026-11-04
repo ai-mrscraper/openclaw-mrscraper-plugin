@@ -23,7 +23,7 @@ Some users need rendered content from pages that defeat plain HTTP fetching, plu
 
 ## Impact
 
-Affected users are those who fetch pages requiring rendering or bot protection and want to extract or rerun structured results inside OpenClaw. The current trust rule blocks an external MrScraper provider on every sandboxed `web_fetch` call; outside a sandbox, users can install the plugin and select its fallback. This blocks a uniform web-fetch workflow for those users and requires a separate API path or an unsandboxed configuration. We do not have verified plugin adoption or failure-rate figures to claim yet. This request asks for product criteria; any implementation proposal would need real usage evidence.
+Affected users are those who fetch pages that need rendering and want to extract or rerun structured results inside OpenClaw. The current trust rule blocks an external MrScraper provider on every sandboxed `web_fetch` call; outside a sandbox, users can install the plugin and select its fallback. This blocks a uniform web-fetch workflow for those users and requires a separate API path or an unsandboxed configuration. We do not have verified plugin adoption or failure-rate figures to claim yet. This request asks for product criteria; any implementation proposal would need real usage evidence.
 
 ## Evidence and examples
 
@@ -31,7 +31,7 @@ Affected users are those who fetch pages requiring rendering or bot protection a
 - [Published MrScraper code plugin](https://clawhub.ai/ai-mrscraper/plugins/openclaw-mrscraper), version 0.1.0, with a clean ClawHub security scan. It remains a community package, not an official OpenClaw plugin.
 - [Earlier bundled-plugin PR and closure](https://github.com/openclaw/openclaw/pull/63668), [author-closed prior plugin PR](https://github.com/openclaw/openclaw/pull/61866), and [declined bundled skill PR](https://github.com/openclaw/openclaw/pull/70034).
 - [OpenClaw web provider rules](https://docs.openclaw.ai/tools/web-fetch), [community plugin policy](https://docs.openclaw.ai/plugins/community), and [project vision](https://github.com/openclaw/openclaw/blob/main/VISION.md).
-- [Public plugin source](https://github.com/ai-mrscraper/openclaw-mrscraper-plugin): 21 tests pass in [CI](https://github.com/ai-mrscraper/openclaw-mrscraper-plugin/actions/runs/37743216570), and ClawHub's isolated runtime validator reports zero findings against OpenClaw 2026.9.8. Prior review findings have been addressed: the unblocker API token uses a header, Markdown mode returns Markdown, the unused timeout override parameters are gone, and the platform API host allowlist excludes the unrelated sync API host.
+- [Public plugin source](https://github.com/ai-mrscraper/openclaw-mrscraper-plugin): 21 tests pass in [CI](https://github.com/ai-mrscraper/openclaw-mrscraper-plugin/actions/runs/37743216570), and ClawHub's isolated runtime validator reports zero findings against OpenClaw 2026.9.8. Prior review findings have been addressed: the fetch API token uses a header, Markdown mode returns Markdown, the unused timeout override parameters are gone, and the platform API host allowlist excludes the unrelated sync API host.
 - An isolated OpenClaw 2026.9.8 installation using `openclaw plugins install clawhub:@ai-mrscraper/openclaw-mrscraper --accept-capabilities` loaded all eight tools and the `web_fetch` provider; `openclaw plugins doctor` passed. This did not call the live MrScraper API.
 
 ## Additional information

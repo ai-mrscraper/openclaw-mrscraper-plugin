@@ -8,12 +8,15 @@ import { createMrScraperGetResultByIdTool } from "./src/mrscraper-get-result-by-
 import { createMrScraperRerunAiScraperTool } from "./src/mrscraper-rerun-ai-scraper-tool.js";
 import { createMrScraperRerunManualScraperTool } from "./src/mrscraper-rerun-manual-scraper-tool.js";
 import { createMrScraperScrapeTool } from "./src/mrscraper-scrape-tool.js";
+import { createMrScraperWebSearchProvider } from "./src/mrscraper-search-provider.js";
+import { createMrScraperWebSearchTool } from "./src/mrscraper-web-search-tool.js";
 export default definePluginEntry({
     id: "mrscraper",
     name: "MrScraper Plugin",
-    description: "MrScraper unblocker and AI scraping plugin",
+    description: "MrScraper web fetch, web search, and AI scraping plugin",
     register(api) {
         api.registerWebFetchProvider(createMrScraperWebFetchProvider());
+        api.registerWebSearchProvider(createMrScraperWebSearchProvider());
         api.registerTool(createMrScraperBulkRerunAiScraperTool(api));
         api.registerTool(createMrScraperBulkRerunManualScraperTool(api));
         api.registerTool(createMrScraperFetchHtmlTool(api));
@@ -22,5 +25,6 @@ export default definePluginEntry({
         api.registerTool(createMrScraperRerunAiScraperTool(api));
         api.registerTool(createMrScraperRerunManualScraperTool(api));
         api.registerTool(createMrScraperScrapeTool(api));
+        api.registerTool(createMrScraperWebSearchTool(api));
     },
 });

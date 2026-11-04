@@ -4,10 +4,11 @@ import {
   normalizeSecretInput,
 } from "openclaw/plugin-sdk/secret-input";
 
-export const DEFAULT_MRSCRAPER_UNBLOCKER_BASE_URL = "https://api.mrscraper.com";
+export const DEFAULT_MRSCRAPER_SCRAPER_API_BASE_URL = "https://api.mrscraper.com";
 export const DEFAULT_MRSCRAPER_PLATFORM_BASE_URL = "https://api.app.mrscraper.com";
 export const DEFAULT_MRSCRAPER_FETCH_TIMEOUT_SECONDS = 60;
 export const DEFAULT_MRSCRAPER_SCRAPE_TIMEOUT_SECONDS = 120;
+export const DEFAULT_MRSCRAPER_SEARCH_TIMEOUT_SECONDS = 60;
 
 type PluginEntryConfig =
   | {
@@ -22,6 +23,10 @@ type PluginEntryConfig =
         baseUrl?: string;
         timeoutSeconds?: number;
         proxyCountry?: string;
+      };
+      webSearch?: {
+        timeoutSeconds?: number;
+        country?: string;
       };
     }
   | undefined;
@@ -76,6 +81,22 @@ export function resolveMrScraperApiToken(cfg?: OpenClawConfig): string | undefin
   );
 }
 
+/** Raw configured token. The web fetch and web search providers share this path. */
+export function readMrScraperConfiguredApiToken(config?: OpenClawConfig): unknown {
+  return resolvePluginConfig(config)?.apiToken;
+}
+
+export function writeMrScraperConfiguredApiToken(configTarget: OpenClawConfig, value: unknown): void {
+  const plugins = (configTarget.plugins ??= {});
+  const entries = (plugins.entries ??= {});
+  const entry = (entries.mrscraper ??= {});
+  const pluginConfig =
+    entry.config && typeof entry.config === "object" && !Array.isArray(entry.config)
+      ? entry.config
+      : ((entry.config = {}), entry.config);
+  pluginConfig.apiToken = value;
+}
+
 export function resolveMrScraperWebFetchConfig(cfg?: OpenClawConfig) {
   return resolvePluginConfig(cfg)?.webFetch;
 }
@@ -84,12 +105,16 @@ export function resolveMrScraperPlatformConfig(cfg?: OpenClawConfig) {
   return resolvePluginConfig(cfg)?.platform;
 }
 
-export function resolveMrScraperUnblockerBaseUrl(cfg?: OpenClawConfig): string {
+export function resolveMrScraperWebSearchConfig(cfg?: OpenClawConfig) {
+  return resolvePluginConfig(cfg)?.webSearch;
+}
+
+export function resolveMrScraperFetchBaseUrl(cfg?: OpenClawConfig): string {
   const configured =
     (typeof resolveMrScraperWebFetchConfig(cfg)?.baseUrl === "string"
       ? resolveMrScraperWebFetchConfig(cfg)?.baseUrl?.trim()
       : "") || "";
-  return configured || DEFAULT_MRSCRAPER_UNBLOCKER_BASE_URL;
+  return configured || DEFAULT_MRSCRAPER_SCRAPER_API_BASE_URL;
 }
 
 export function resolveMrScraperPlatformBaseUrl(cfg?: OpenClawConfig): string {
@@ -114,6 +139,14 @@ export function resolveMrScraperScrapeTimeoutSeconds(cfg?: OpenClawConfig): numb
     return Math.floor(configured);
   }
   return DEFAULT_MRSCRAPER_SCRAPE_TIMEOUT_SECONDS;
+}
+
+export function resolveMrScraperSearchTimeoutSeconds(cfg?: OpenClawConfig): number {
+  const configured = resolveMrScraperWebSearchConfig(cfg)?.timeoutSeconds;
+  if (typeof configured === "number" && Number.isFinite(configured) && configured > 0) {
+    return Math.floor(configured);
+  }
+  return DEFAULT_MRSCRAPER_SEARCH_TIMEOUT_SECONDS;
 }
 
 export function resolveMrScraperGeoCode(
@@ -144,6 +177,19 @@ export function resolveMrScraperProxyCountry(
     (typeof override === "string" ? override.trim() : "") ||
     (typeof resolveMrScraperPlatformConfig(cfg)?.proxyCountry === "string"
       ? resolveMrScraperPlatformConfig(cfg)?.proxyCountry?.trim()
+      : "") ||
+    "";
+  return candidate || undefined;
+}
+
+export function resolveMrScraperSearchCountry(
+  cfg?: OpenClawConfig,
+  override?: string,
+): string | undefined {
+  const candidate =
+    (typeof override === "string" ? override.trim() : "") ||
+    (typeof resolveMrScraperWebSearchConfig(cfg)?.country === "string"
+      ? resolveMrScraperWebSearchConfig(cfg)?.country?.trim()
       : "") ||
     "";
   return candidate || undefined;
