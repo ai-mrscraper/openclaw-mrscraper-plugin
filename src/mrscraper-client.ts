@@ -440,22 +440,24 @@ export async function runMrScraperWebSearch(
     params.timeoutSeconds,
     resolveMrScraperSearchTimeoutSeconds(params.cfg),
   );
-  const body: Record<string, unknown> = {
-    action: "websearch",
-    query,
-    numResults: Math.max(count, MIN_SEARCH_RESULTS),
-  };
+  const url = new URL(WEB_SEARCH_ENDPOINT);
+  url.searchParams.set("action", "websearch");
+  url.searchParams.set("query", query);
   if (country) {
-    body.country = country.toLowerCase();
+    url.searchParams.set("country", country.toLowerCase());
   }
+  url.searchParams.set("numResults", String(Math.max(count, MIN_SEARCH_RESULTS)));
 
   const start = Date.now();
   const payload = await withStrictWebToolsEndpoint(
     {
-      url: WEB_SEARCH_ENDPOINT,
+      url: url.toString(),
       timeoutSeconds,
       signal: params.signal,
-      init: { method: "POST", headers: buildPlatformHeaders(apiToken), body: JSON.stringify(body) },
+      init: {
+        method: "GET",
+        headers: { accept: "application/json", "x-api-token": normalizeSecretInput(apiToken) },
+      },
     },
     async ({ response }) => {
       if (!response.ok) {

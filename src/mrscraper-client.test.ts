@@ -149,7 +149,7 @@ describe("MrScraper web search", () => {
   const searchResponse = (data: unknown[]) =>
     Response.json({ success: true, message: "Search completed", data, tokenUsage: 10 });
 
-  it("posts a websearch action and returns wrapped results trimmed to count", async () => {
+  it("sends a websearch GET with a query string and returns wrapped results trimmed to count", async () => {
     request.mockImplementation(async (_options, handle) =>
       handle({
         response: searchResponse([
@@ -169,14 +169,12 @@ describe("MrScraper web search", () => {
     });
 
     const options = request.mock.calls[0]?.[0];
-    expect(options.url).toBe("https://api.mrscraper.com/");
-    expect(options.init.method).toBe("POST");
-    expect(options.init.headers["x-api-token"]).toBe("test-token");
-    expect(JSON.parse(options.init.body)).toEqual({
-      action: "websearch",
-      query: "mrscraper",
-      numResults: 10,
-      country: "gb",
+    expect(options.url).toBe(
+      "https://api.mrscraper.com/?action=websearch&query=mrscraper&country=gb&numResults=10",
+    );
+    expect(options.init).toEqual({
+      method: "GET",
+      headers: { accept: "application/json", "x-api-token": "test-token" },
     });
     expect(result).toMatchObject({
       query: "mrscraper",
@@ -207,10 +205,11 @@ describe("MrScraper web search", () => {
 
     await runMrScraperWebSearch({ cfg: config, query: "q", count });
 
-    expect(JSON.parse(request.mock.calls[0]?.[0].init.body).numResults).toBe(numResults);
+    const url = new URL(request.mock.calls[0]?.[0].url);
+    expect(url.searchParams.get("numResults")).toBe(String(numResults));
   });
 
-  it("prefers the requested country over the configured one", async () => {
+  it("sends the requested country, else the configured one, else no country", async () => {
     request.mockImplementation(async (_options, handle) => handle({ response: searchResponse([]) }));
     const cfg = {
       plugins: {
@@ -220,9 +219,12 @@ describe("MrScraper web search", () => {
 
     await runMrScraperWebSearch({ cfg, query: "q" });
     await runMrScraperWebSearch({ cfg, query: "q", country: "us" });
+    await runMrScraperWebSearch({ cfg: config, query: "q" });
 
-    expect(JSON.parse(request.mock.calls[0]?.[0].init.body).country).toBe("id");
-    expect(JSON.parse(request.mock.calls[1]?.[0].init.body).country).toBe("us");
+    const countries = request.mock.calls.map(([options]) =>
+      new URL(options.url).searchParams.get("country"),
+    );
+    expect(countries).toEqual(["id", "us", null]);
   });
 
   it("rejects a country that is not a two-letter code before calling the API", async () => {
