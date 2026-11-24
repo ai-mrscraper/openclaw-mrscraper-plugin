@@ -2,21 +2,15 @@ import { Type } from "@sinclair/typebox";
 import { enablePluginInConfig } from "openclaw/plugin-sdk/provider-web-fetch";
 import { readMrScraperConfiguredApiToken, writeMrScraperConfiguredApiToken } from "./config.js";
 import { runMrScraperFetchHtml } from "./mrscraper-client.js";
+// OpenClaw's web_fetch hands its fallback provider url, extractMode, and maxChars. Page settings
+// come from plugins.entries.mrscraper.config.webFetch.
 const MrScraperWebFetchSchema = Type.Object({
-    url: Type.String({ description: "HTTP or HTTPS URL to fetch through MrScraper." }),
+    url: Type.String({
+        description: "URL of the page to scrape. Must include the protocol (https://).",
+    }),
     maxChars: Type.Optional(Type.Number({
         description: "Maximum characters to return.",
         minimum: 100,
-    })),
-    timeoutSeconds: Type.Optional(Type.Number({
-        description: "Timeout in seconds for the fetch request.",
-        minimum: 1,
-    })),
-    geoCode: Type.Optional(Type.String({
-        description: "Optional country to load the page from, for example SG or US.",
-    })),
-    blockResources: Type.Optional(Type.Boolean({
-        description: "Block images, fonts, and similar resources to speed up fetches.",
     })),
 }, { additionalProperties: false });
 export function createMrScraperWebFetchProvider() {
@@ -59,11 +53,6 @@ export function createMrScraperWebFetchProvider() {
                 maxChars: typeof args.maxChars === "number" && Number.isFinite(args.maxChars)
                     ? Math.floor(args.maxChars)
                     : undefined,
-                timeoutSeconds: typeof args.timeoutSeconds === "number" && Number.isFinite(args.timeoutSeconds)
-                    ? Math.floor(args.timeoutSeconds)
-                    : undefined,
-                geoCode: typeof args.geoCode === "string" ? args.geoCode : undefined,
-                blockResources: typeof args.blockResources === "boolean" ? args.blockResources : undefined,
                 extractMode: args.extractMode === "text" ? "text" : "markdown",
             }),
         }),

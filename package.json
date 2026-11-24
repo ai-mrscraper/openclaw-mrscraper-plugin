@@ -1,6 +1,6 @@
 {
   "name": "@ai-mrscraper/openclaw-mrscraper",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "MrScraper web fetch, web search, and scraping tools for OpenClaw",
   "type": "module",
   "main": "./dist/index.js",

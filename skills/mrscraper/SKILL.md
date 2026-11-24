@@ -1,6 +1,6 @@
 ---
 name: mrscraper
-description: MrScraper web search, page fetch, and AI scraping tools for search results, rendered pages, and structured extraction.
+description: MrScraper web search, page fetch, and AI scraping tools for search results, raw page HTML, and structured extraction.
 metadata:
   { "openclaw": { "emoji": "🕸️", "requires": { "config": ["plugins.entries.mrscraper.enabled"] } } }
 ---
@@ -12,9 +12,9 @@ metadata:
 | Need                              | Tool                                  | When                                                                |
 | --------------------------------- | ------------------------------------- | ------------------------------------------------------------------- |
 | Web search                        | `web_search`                          | MrScraper is the selected `web_search` provider                     |
-| Up to 100 search results          | `mrscraper_web_search`                | Need more than 10 results or a custom timeout                       |
+| Up to 100 search results          | `mrscraper_web_search`                | Need more than 10 results                                           |
 | JS-heavy page fetch               | `web_fetch`                           | MrScraper can back up `web_fetch` in non-sandboxed sessions         |
-| Rendered HTML plus extracted text | `mrscraper_fetch_html`                | Need controls like `geoCode` or `blockResources`                    |
+| Raw HTML plus extracted text      | `mrscraper_fetch_html`                | Need page options such as `waitForSelector`, `geoCode`, or a screenshot |
 | AI-powered structured extraction  | `mrscraper_scrape`                    | Need schema-free extraction from plain-language instructions        |
 | Reuse an AI scraper               | `mrscraper_rerun_ai_scraper`          | Apply an existing AI scraper to a new page or crawl target          |
 | Batch AI reruns                   | `mrscraper_bulk_rerun_ai_scraper`     | Reuse one AI scraper across many URLs                               |
@@ -28,22 +28,22 @@ metadata:
 When `mrscraper` is the selected `web_search` provider, `web_search` returns
 titles, URLs, and snippets from MrScraper.
 
-| Parameter | Description                               |
-| --------- | ----------------------------------------- |
-| `query`   | Search query                              |
-| `count`   | Results to return, 1 to 10                |
-| `country` | Two-letter country code like `us` or `gb` |
+| Parameter | Description |
+| --- | --- |
+| `query` | The search query, from 1 to 1000 characters. |
+| `count` | Results to return, 1 to 10. |
+| `country` | Two-letter country code to run the search from. Defaults to the United States. |
 
 ## mrscraper_web_search
 
-Use this when you need more than 10 results or a custom timeout.
+Search the web and return ranked results with titles, URLs, descriptions, and
+sources. Use this when you need more than 10 results.
 
-| Parameter        | Description                               |
-| ---------------- | ----------------------------------------- |
-| `query`          | Search query                              |
-| `count`          | Results to return, 1 to 100 (default 10)  |
-| `country`        | Two-letter country code like `us` or `gb` |
-| `timeoutSeconds` | Request timeout                           |
+| Parameter | Description |
+| --- | --- |
+| `query` | The search query, from 1 to 1000 characters. Required. |
+| `country` | Two-letter country code to run the search from. Defaults to the United States. |
+| `numResults` | How many results to return, from 10 to 100. The search may return fewer. Defaults to 10. |
 
 ## web_fetch
 
@@ -52,23 +52,38 @@ OpenClaw tries local extraction first and calls MrScraper if it fails or
 Readability is disabled. Sandboxed `web_fetch` does not load third-party fetch
 providers. Use `mrscraper_fetch_html` when the agent's tool policy allows it.
 
-| Parameter  | Description                 |
-| ---------- | --------------------------- |
-| `url`      | HTTP or HTTPS URL to fetch  |
-| `maxChars` | Maximum returned characters |
+| Parameter | Description |
+| --- | --- |
+| `url` | URL of the page to scrape. Must include the protocol (https://). |
+| `maxChars` | Maximum characters to return. |
+
+The page settings in `plugins.entries.mrscraper.config.webFetch` (`timeoutSeconds`,
+`geoCode`, `blockResources`) apply when they are set.
 
 ## mrscraper_fetch_html
 
-Use this when you need fetch controls like `geoCode` or `blockResources`, or
-want both rendered HTML and extracted text back in one tool result.
+Retrieve the raw HTML of a page. Browser rendering and a screenshot are optional.
+The result holds the HTML, the page title, and the extracted text; a screenshot
+comes back as an image.
 
-| Parameter        | Description                                     |
-| ---------------- | ----------------------------------------------- |
-| `url`            | HTTP or HTTPS URL to fetch                      |
-| `maxChars`       | Maximum returned characters                     |
-| `timeoutSeconds` | Request timeout                                 |
-| `geoCode`        | Optional country routing code like `US` or `SG` |
-| `blockResources` | Block images/fonts/resources for faster loads   |
+| Parameter | Description |
+| --- | --- |
+| `url` | URL of the page to scrape. Must include the protocol (https://). Required. |
+| `browserRendering` | Controls whether the page is loaded in a browser. Leave it out to load the page without a browser first and switch to a browser automatically if the request is blocked. Set true to always load the page in a browser, which JavaScript-heavy sites, SPAs, and pages that load content dynamically need. Set false to never use a browser. |
+| `timeout` | Maximum seconds to wait for the scrape before the request times out, from 1 to 330. Increase for slow or complex pages. Defaults to 300. |
+| `warmStart` | Opens the site's home page first to warm the session before loading the target URL. Useful for sites that expect a normal browsing session before deeper pages. |
+| `blockResources` | Blocks images, fonts, and stylesheets from loading. Speeds up scraping and reduces bandwidth usage. |
+| `waitForSelector` | Waits until a specific CSS selector or text appears on the page before returning it, such as #results. Up to 500 characters. Useful for content that loads asynchronously after the initial page load. |
+| `geoCode` | Two-letter country code to load the page from, such as us or gb. Defaults to the United States. |
+| `maxAge` | Serves a cached result of the same request when it is newer than this age, in milliseconds, such as 86400000 for 1 day. Up to 604800000 (7 days). 0, the default, always scrapes fresh. A cached result costs the same tokens as the original scrape. |
+| `maxRetries` | Maximum number of retries for the request. Omit for no limit. |
+| `screenshot` | Also captures a screenshot of the rendered page as a base64-encoded PNG: `full` captures the entire scroll height, `top` captures the first viewport, and `<width>x<height>` sets the viewport size in pixels with an optional `-<zoom>` percent, such as `1280x800` or `1920x1080-75`. Width and height range from 100 to 3840, zoom from 25 to 300. Setting it forces browser rendering. Leave it out for no screenshot. |
+| `maxChars` | Maximum characters to return. |
+
+Leave out the inputs you do not need: they are not sent, and MrScraper's defaults
+apply. Every page request (this tool and `web_fetch`) sends `maxAge` (0 unless
+set) and `saveResult=true`, so each fetched page is saved to the MrScraper
+account's results.
 
 ## mrscraper_scrape
 

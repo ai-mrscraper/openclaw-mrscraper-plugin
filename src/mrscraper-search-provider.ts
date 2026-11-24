@@ -6,13 +6,18 @@ import { runMrScraperWebSearch } from "./mrscraper-client.js";
 
 type WebSearchProviderPlugin = Parameters<OpenClawPluginApi["registerWebSearchProvider"]>[0];
 
-// OpenClaw's web_search contract returns 1 to 10 results, 5 by default.
+// OpenClaw's web_search contract returns 1 to 10 results, 5 by default. The API returns up to 10
+// when numResults is left out, so the provider sends no numResults and keeps the first `count`.
 const DEFAULT_SEARCH_COUNT = 5;
 const MAX_SEARCH_COUNT = 10;
 
 const MrScraperWebSearchSchema = Type.Object(
   {
-    query: Type.String({ description: "Search query." }),
+    query: Type.String({
+      description: "The search query, from 1 to 1000 characters.",
+      minLength: 1,
+      maxLength: 1000,
+    }),
     count: Type.Optional(
       Type.Integer({
         description: "Number of results to return (1-10).",
@@ -21,7 +26,11 @@ const MrScraperWebSearchSchema = Type.Object(
       }),
     ),
     country: Type.Optional(
-      Type.String({ description: "Two-letter country code for the results, for example us or gb." }),
+      Type.String({
+        description:
+          "Two-letter country code to run the search from. Defaults to the United States.",
+        pattern: "^[A-Za-z]{2}$",
+      }),
     ),
   },
   { additionalProperties: false },
@@ -56,7 +65,8 @@ export function createMrScraperWebSearchProvider(): WebSearchProviderPlugin {
     setConfiguredCredentialValue: writeMrScraperConfiguredApiToken,
     applySelectionConfig: (config) => enablePluginInConfig(config, "mrscraper").config,
     createTool: ({ config, searchConfig }) => ({
-      description: "Search the web with MrScraper. Returns titles, URLs, and snippets.",
+      description:
+        "Search the web and return ranked results with titles, URLs, descriptions, and sources.",
       parameters: MrScraperWebSearchSchema,
       execute: async (args, context) =>
         await runMrScraperWebSearch({

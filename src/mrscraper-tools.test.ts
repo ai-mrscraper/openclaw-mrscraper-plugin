@@ -1,7 +1,6 @@
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-runtime";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  DEFAULT_MRSCRAPER_FETCH_TIMEOUT_SECONDS,
   DEFAULT_MRSCRAPER_PLATFORM_BASE_URL,
   DEFAULT_MRSCRAPER_SCRAPE_TIMEOUT_SECONDS,
   DEFAULT_MRSCRAPER_SCRAPER_API_BASE_URL,
@@ -9,7 +8,7 @@ import {
   resolveMrScraperApiToken,
   resolveMrScraperBlockResources,
   resolveMrScraperFetchBaseUrl,
-  resolveMrScraperFetchTimeoutSeconds,
+  resolveMrScraperFetchTimeout,
   resolveMrScraperPlatformBaseUrl,
   resolveMrScraperProxyCountry,
   resolveMrScraperScrapeTimeoutSeconds,
@@ -67,6 +66,7 @@ describe("mrscraper tools", () => {
   let createMrScraperScrapeTool: typeof import("./mrscraper-scrape-tool.js").createMrScraperScrapeTool;
   let mrscraperClientTesting: typeof import("./mrscraper-client.js").__testing;
   let createMrScraperWebSearchProvider: typeof import("./mrscraper-search-provider.js").createMrScraperWebSearchProvider;
+  let createMrScraperWebSearchTool: typeof import("./mrscraper-web-search-tool.js").createMrScraperWebSearchTool;
 
   beforeAll(async () => {
     ({ createMrScraperBulkRerunAiScraperTool } =
@@ -82,6 +82,7 @@ describe("mrscraper tools", () => {
       await import("./mrscraper-rerun-manual-scraper-tool.js"));
     ({ createMrScraperScrapeTool } = await import("./mrscraper-scrape-tool.js"));
     ({ createMrScraperWebSearchProvider } = await import("./mrscraper-search-provider.js"));
+    ({ createMrScraperWebSearchTool } = await import("./mrscraper-web-search-tool.js"));
     ({ __testing: mrscraperClientTesting } =
       await vi.importActual<typeof import("./mrscraper-client.js")>("./mrscraper-client.js"));
   });
@@ -139,21 +140,18 @@ describe("mrscraper tools", () => {
       throw new Error("Expected tool definition");
     }
 
-    await tool.execute({
-      url: "https://example.com",
-      maxChars: 1234,
-      timeoutSeconds: 30,
-      geoCode: "SG",
-      blockResources: true,
-    });
+    await tool.execute({ url: "https://example.com", maxChars: 1234, extractMode: "text" });
+    await tool.execute({ url: "https://example.com/next" });
 
-    expect(runMrScraperFetchHtml).toHaveBeenCalledWith({
+    expect(runMrScraperFetchHtml).toHaveBeenNthCalledWith(1, {
       cfg: { test: true },
       url: "https://example.com",
       maxChars: 1234,
-      timeoutSeconds: 30,
-      geoCode: "SG",
-      blockResources: true,
+      extractMode: "text",
+    });
+    expect(runMrScraperFetchHtml).toHaveBeenNthCalledWith(2, {
+      cfg: { test: true },
+      url: "https://example.com/next",
       extractMode: "markdown",
     });
   });
@@ -192,30 +190,88 @@ describe("mrscraper tools", () => {
     },
   );
 
-  it("normalizes explicit fetch-tool parameters", async () => {
+  it("passes every Scrape HTML input of the fetch tool to the request, plus maxChars", async () => {
+    runMrScraperFetchHtml.mockResolvedValueOnce({ url: "https://example.com", text: "Hello" });
     const tool = createMrScraperFetchHtmlTool({
       config: { env: "test" },
     } as never);
 
     const result = await tool.execute("call-1", {
       url: "https://example.com",
+      browserRendering: true,
+      timeout: 60,
+      warmStart: false,
+      blockResources: true,
+      waitForSelector: "#results",
+      geoCode: "us",
+      maxAge: 3_600_000,
+      maxRetries: 1,
+      screenshot: "1280x800",
       maxChars: 1500,
-      timeoutSeconds: 45,
-      geoCode: "US",
-      blockResources: false,
     });
 
     expect(runMrScraperFetchHtml).toHaveBeenCalledWith({
       cfg: { env: "test" },
       url: "https://example.com",
+      browserRendering: true,
+      timeout: 60,
+      warmStart: false,
+      blockResources: true,
+      waitForSelector: "#results",
+      geoCode: "us",
+      maxAge: 3_600_000,
+      maxRetries: 1,
+      screenshot: "1280x800",
       maxChars: 1500,
-      timeoutSeconds: 45,
-      geoCode: "US",
-      blockResources: false,
     });
-    expect(result.details).toMatchObject({
-      cfg: { env: "test" },
+    expect(result.details).toEqual({ url: "https://example.com", text: "Hello" });
+  });
+
+  it("leaves the fetch inputs the caller does not set undefined", async () => {
+    const tool = createMrScraperFetchHtmlTool({
+      config: { env: "test" },
+    } as never);
+
+    await tool.execute("call-1b", { url: "https://example.com", waitForSelector: "  " });
+
+    const [params] = runMrScraperFetchHtml.mock.calls[0] ?? [];
+    expect(Object.entries(params ?? {}).filter(([, value]) => value !== undefined)).toEqual([
+      ["cfg", { env: "test" }],
+      ["url", "https://example.com"],
+    ]);
+  });
+
+  it("returns a fetch screenshot as an image block after the JSON text", async () => {
+    runMrScraperFetchHtml.mockResolvedValueOnce({
       url: "https://example.com",
+      text: "Hello",
+      screenshot: { data: "iVBORw0KGgo=", mimeType: "image/png" },
+    });
+    const tool = createMrScraperFetchHtmlTool({
+      config: { env: "test" },
+    } as never);
+
+    const result = await tool.execute("call-1c", { url: "https://example.com", screenshot: "full" });
+
+    expect(result.content).toEqual([
+      { type: "text", text: JSON.stringify({ url: "https://example.com", text: "Hello" }, null, 2) },
+      { type: "image", data: "iVBORw0KGgo=", mimeType: "image/png" },
+    ]);
+    expect(result.details).toEqual({ url: "https://example.com", text: "Hello" });
+  });
+
+  it("passes the Web Search inputs of mrscraper_web_search to the request", async () => {
+    const tool = createMrScraperWebSearchTool({
+      config: { env: "test" },
+    } as never);
+
+    await tool.execute("call-1d", { query: "web scraping api", country: "gb", numResults: 20 });
+
+    expect(runMrScraperWebSearch).toHaveBeenCalledWith({
+      cfg: { env: "test" },
+      query: "web scraping api",
+      country: "gb",
+      numResults: 20,
     });
   });
 
@@ -420,10 +476,12 @@ describe("mrscraper tools", () => {
     expect(resolveMrScraperApiToken(cfg)).toBe("plugin-token");
     expect(resolveMrScraperFetchBaseUrl(cfg)).toBe("https://api.mrscraper.com");
     expect(resolveMrScraperPlatformBaseUrl(cfg)).toBe("https://api.app.mrscraper.com");
-    expect(resolveMrScraperFetchTimeoutSeconds(cfg)).toBe(75);
+    expect(resolveMrScraperFetchTimeout(cfg)).toBe(75);
+    expect(resolveMrScraperFetchTimeout(cfg, 30)).toBe(30);
     expect(resolveMrScraperScrapeTimeoutSeconds(cfg)).toBe(150);
     expect(resolveMrScraperProxyCountry(cfg)).toBe("SG");
     expect(resolveMrScraperBlockResources(cfg)).toBe(true);
+    expect(resolveMrScraperBlockResources(cfg, false)).toBe(false);
     expect(resolveMrScraperSearchTimeoutSeconds(cfg)).toBe(45);
   });
 
@@ -433,9 +491,9 @@ describe("mrscraper tools", () => {
     expect(resolveMrScraperApiToken()).toBe("env-token");
     expect(resolveMrScraperFetchBaseUrl()).toBe(DEFAULT_MRSCRAPER_SCRAPER_API_BASE_URL);
     expect(resolveMrScraperPlatformBaseUrl()).toBe(DEFAULT_MRSCRAPER_PLATFORM_BASE_URL);
-    expect(resolveMrScraperFetchTimeoutSeconds()).toBe(DEFAULT_MRSCRAPER_FETCH_TIMEOUT_SECONDS);
+    expect(resolveMrScraperFetchTimeout()).toBeUndefined();
     expect(resolveMrScraperScrapeTimeoutSeconds()).toBe(DEFAULT_MRSCRAPER_SCRAPE_TIMEOUT_SECONDS);
-    expect(resolveMrScraperBlockResources()).toBe(false);
+    expect(resolveMrScraperBlockResources()).toBeUndefined();
     expect(resolveMrScraperSearchTimeoutSeconds()).toBe(DEFAULT_MRSCRAPER_SEARCH_TIMEOUT_SECONDS);
   });
 

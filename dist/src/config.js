@@ -1,7 +1,6 @@
 import { normalizeResolvedSecretInputString, normalizeSecretInput, } from "openclaw/plugin-sdk/secret-input";
 export const DEFAULT_MRSCRAPER_SCRAPER_API_BASE_URL = "https://api.mrscraper.com";
 export const DEFAULT_MRSCRAPER_PLATFORM_BASE_URL = "https://api.app.mrscraper.com";
-export const DEFAULT_MRSCRAPER_FETCH_TIMEOUT_SECONDS = 60;
 export const DEFAULT_MRSCRAPER_SCRAPE_TIMEOUT_SECONDS = 120;
 export const DEFAULT_MRSCRAPER_SEARCH_TIMEOUT_SECONDS = 60;
 function resolvePluginConfig(cfg) {
@@ -66,12 +65,13 @@ export function resolveMrScraperPlatformBaseUrl(cfg) {
         : "") || "";
     return configured || DEFAULT_MRSCRAPER_PLATFORM_BASE_URL;
 }
-export function resolveMrScraperFetchTimeoutSeconds(cfg) {
-    const configured = resolveMrScraperWebFetchConfig(cfg)?.timeoutSeconds;
-    if (typeof configured === "number" && Number.isFinite(configured) && configured > 0) {
-        return Math.floor(configured);
+/** Page timeout in seconds: the call's value, else webFetch.timeoutSeconds. Unset leaves the API default. */
+export function resolveMrScraperFetchTimeout(cfg, override) {
+    if (typeof override === "number") {
+        return override;
     }
-    return DEFAULT_MRSCRAPER_FETCH_TIMEOUT_SECONDS;
+    const configured = resolveMrScraperWebFetchConfig(cfg)?.timeoutSeconds;
+    return typeof configured === "number" ? configured : undefined;
 }
 export function resolveMrScraperScrapeTimeoutSeconds(cfg) {
     const configured = resolveMrScraperPlatformConfig(cfg)?.timeoutSeconds;
@@ -95,11 +95,13 @@ export function resolveMrScraperGeoCode(cfg, override) {
         "";
     return candidate || undefined;
 }
+/** blockResources: the call's value, else webFetch.blockResources. Unset leaves the API default. */
 export function resolveMrScraperBlockResources(cfg, override) {
     if (typeof override === "boolean") {
         return override;
     }
-    return resolveMrScraperWebFetchConfig(cfg)?.blockResources === true;
+    const configured = resolveMrScraperWebFetchConfig(cfg)?.blockResources;
+    return typeof configured === "boolean" ? configured : undefined;
 }
 export function resolveMrScraperProxyCountry(cfg, override) {
     const candidate = (typeof override === "string" ? override.trim() : "") ||

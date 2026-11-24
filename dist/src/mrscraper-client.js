@@ -1,19 +1,30 @@
 import TurndownService from "turndown";
 import { readResponseText, resolveTimeoutSeconds, withStrictWebToolsEndpoint, wrapExternalContent, wrapWebContent, } from "openclaw/plugin-sdk/provider-web-fetch";
 import { normalizeSecretInput } from "openclaw/plugin-sdk/secret-input";
-import { DEFAULT_MRSCRAPER_SCRAPER_API_BASE_URL, resolveMrScraperApiToken, resolveMrScraperBlockResources, resolveMrScraperFetchBaseUrl, resolveMrScraperFetchTimeoutSeconds, resolveMrScraperGeoCode, resolveMrScraperPlatformBaseUrl, resolveMrScraperProxyCountry, resolveMrScraperScrapeTimeoutSeconds, resolveMrScraperSearchCountry, resolveMrScraperSearchTimeoutSeconds, } from "./config.js";
+import { DEFAULT_MRSCRAPER_SCRAPER_API_BASE_URL, resolveMrScraperApiToken, resolveMrScraperBlockResources, resolveMrScraperFetchBaseUrl, resolveMrScraperFetchTimeout, resolveMrScraperGeoCode, resolveMrScraperPlatformBaseUrl, resolveMrScraperProxyCountry, resolveMrScraperScrapeTimeoutSeconds, resolveMrScraperSearchCountry, resolveMrScraperSearchTimeoutSeconds, } from "./config.js";
 const ALLOWED_SCRAPER_API_HOSTS = new Set(["api.mrscraper.com"]);
 const ALLOWED_PLATFORM_HOSTS = new Set(["api.app.mrscraper.com"]);
 const DEFAULT_FETCH_MAX_CHARS = 50_000;
 const MAX_FETCH_RESPONSE_BYTES = 5_000_000;
+// A screenshot arrives as base64 image data next to the HTML.
+const MAX_SCREENSHOT_RESPONSE_BYTES = 25_000_000;
 const MAX_PLATFORM_RESPONSE_BYTES = 5_000_000;
 const MAX_ERROR_RESPONSE_BYTES = 64_000;
 const MAX_ERROR_DETAIL_CHARS = 1_000;
 const MAX_SEARCH_RESPONSE_BYTES = 1_000_000;
-// The API rejects numResults below 10, so smaller counts are trimmed locally.
+// The API scrapes for up to 300 seconds when no timeout is sent; the HTTP deadline adds 30.
+const DEFAULT_PAGE_TIMEOUT_SECONDS = 300;
+const PAGE_DEADLINE_MARGIN_SECONDS = 30;
+const MAX_PAGE_TIMEOUT_SECONDS = 330;
+// maxAge accepts up to 7 days, in milliseconds.
+const MAX_AGE_MS = 604_800_000;
+const MAX_WAIT_FOR_SELECTOR_CHARS = 500;
+const MAX_SEARCH_QUERY_CHARS = 1_000;
 const MIN_SEARCH_RESULTS = 10;
 const MAX_SEARCH_RESULTS = 100;
-const SEARCH_COUNTRY_PATTERN = /^[a-z]{2}$/i;
+const COUNTRY_CODE_PATTERN = /^[a-z]{2}$/i;
+// full, top, or <width>x<height> with an optional -<zoom> percent.
+const SCREENSHOT_PATTERN = /^(full|top|[0-9]{3,4}x[0-9]{3,4}(-[0-9]{2,3})?)$/;
 const WEB_SEARCH_ENDPOINT = `${DEFAULT_MRSCRAPER_SCRAPER_API_BASE_URL}/`;
 function resolveEndpoint(params) {
     const candidate = params.baseUrl.trim() || params.defaultBaseUrl;
@@ -163,36 +174,128 @@ function truncate(value, maxChars) {
         truncated: true,
     };
 }
+function pageUrlInput(value) {
+    let parsed;
+    try {
+        parsed = new URL(value);
+    }
+    catch {
+        // Reported below.
+    }
+    if (!parsed || (parsed.protocol !== "http:" && parsed.protocol !== "https:")) {
+        throw new Error("MrScraper fetch url must be an absolute HTTP or HTTPS URL that includes the protocol, such as https://example.com.");
+    }
+    return value;
+}
+function integerInput(name, value, min, max) {
+    if (!Number.isSafeInteger(value) || value < min || (max !== undefined && value > max)) {
+        throw new Error(max === undefined
+            ? `MrScraper ${name} must be an integer of at least ${min}.`
+            : `MrScraper ${name} must be an integer from ${min} to ${max}.`);
+    }
+    return value;
+}
+function countryCodeInput(name, value) {
+    if (!COUNTRY_CODE_PATTERN.test(value)) {
+        throw new Error(`MrScraper ${name} must be a two-letter code such as us or gb, not "${value}".`);
+    }
+    return value.toLowerCase();
+}
+function waitForSelectorInput(value) {
+    const selector = value.trim();
+    if (!selector || [...selector].length > MAX_WAIT_FOR_SELECTOR_CHARS) {
+        throw new Error(`MrScraper fetch waitForSelector must be 1 to ${MAX_WAIT_FOR_SELECTOR_CHARS} characters.`);
+    }
+    return selector;
+}
+function isScreenshotArea(value) {
+    if (!SCREENSHOT_PATTERN.test(value)) {
+        return false;
+    }
+    if (value === "full" || value === "top") {
+        return true;
+    }
+    const [size = "", zoom] = value.split("-");
+    const [width = 0, height = 0] = size.split("x").map(Number);
+    const within = (number, min, max) => number >= min && number <= max;
+    return (within(width, 100, 3840) &&
+        within(height, 100, 3840) &&
+        (zoom === undefined || within(Number(zoom), 25, 300)));
+}
+function screenshotInput(value) {
+    if (!isScreenshotArea(value)) {
+        throw new Error("MrScraper fetch screenshot must be full, top, or <width>x<height> with an optional -<zoom>, such as 1280x800 or 1920x1080-75 (width and height 100 to 3840, zoom 25 to 300).");
+    }
+    return value;
+}
+// With a screenshot, the API answers JSON holding the html and the base64 image.
+function parsePageJson(body) {
+    const payload = JSON.parse(body);
+    const record = payload && typeof payload === "object" && !Array.isArray(payload)
+        ? payload
+        : {};
+    const html = typeof record.html === "string" ? record.html : "";
+    const data = typeof record.screenshot === "string" ? record.screenshot.trim() : "";
+    if (!data) {
+        return { html };
+    }
+    // Base64 JPEG data starts with /9j/; the documented format is PNG.
+    return {
+        html,
+        screenshot: { data, mimeType: data.startsWith("/9j/") ? "image/jpeg" : "image/png" },
+    };
+}
 export async function runMrScraperFetchHtml(params) {
+    const timeout = resolveMrScraperFetchTimeout(params.cfg, params.timeout);
+    const geoCode = resolveMrScraperGeoCode(params.cfg, params.geoCode);
+    // Optional inputs are sent only when set, so the API defaults apply to the rest. maxAge is
+    // always sent (0, a fresh scrape, unless set), and every result is saved to the account.
+    const query = {
+        url: pageUrlInput(params.url),
+        browserRendering: params.browserRendering,
+        timeout: timeout === undefined
+            ? undefined
+            : integerInput("fetch timeout", timeout, 1, MAX_PAGE_TIMEOUT_SECONDS),
+        warmStart: params.warmStart,
+        blockResources: resolveMrScraperBlockResources(params.cfg, params.blockResources),
+        waitForSelector: params.waitForSelector === undefined ? undefined : waitForSelectorInput(params.waitForSelector),
+        geoCode: geoCode === undefined ? undefined : countryCodeInput("fetch geoCode", geoCode),
+        maxAge: integerInput("fetch maxAge", params.maxAge ?? 0, 0, MAX_AGE_MS),
+        maxRetries: params.maxRetries === undefined
+            ? undefined
+            : integerInput("fetch maxRetries", params.maxRetries, 0),
+        screenshot: params.screenshot === undefined ? undefined : screenshotInput(params.screenshot),
+        html: true,
+        markdown: false,
+        saveResult: true,
+    };
     const apiToken = requireMrScraperApiToken(params.cfg, "web_fetch (mrscraper)");
-    const baseUrl = resolveEndpoint({
+    const url = new URL(resolveEndpoint({
         baseUrl: resolveMrScraperFetchBaseUrl(params.cfg),
         defaultBaseUrl: "https://api.mrscraper.com",
         allowedHosts: ALLOWED_SCRAPER_API_HOSTS,
         product: "MrScraper fetch",
-    });
-    const timeoutSeconds = resolveTimeoutSeconds(params.timeoutSeconds, resolveMrScraperFetchTimeoutSeconds(params.cfg));
-    const url = new URL(baseUrl);
-    url.searchParams.set("url", params.url);
-    url.searchParams.set("timeout", String(timeoutSeconds));
-    const geoCode = resolveMrScraperGeoCode(params.cfg, params.geoCode);
-    if (geoCode) {
-        url.searchParams.set("geoCode", geoCode);
-    }
-    if (resolveMrScraperBlockResources(params.cfg, params.blockResources)) {
-        url.searchParams.set("blockResources", "true");
+    }));
+    for (const [key, value] of Object.entries(query)) {
+        if (value !== undefined) {
+            url.searchParams.set(key, String(value));
+        }
     }
     const start = Date.now();
-    const html = await withStrictWebToolsEndpoint({
+    const page = await withStrictWebToolsEndpoint({
         url: url.toString(),
-        timeoutSeconds,
+        timeoutSeconds: (timeout ?? DEFAULT_PAGE_TIMEOUT_SECONDS) + PAGE_DEADLINE_MARGIN_SECONDS,
         init: { headers: { "x-api-token": normalizeSecretInput(apiToken) } },
     }, async ({ response }) => {
         if (!response.ok) {
             await throwHttpError(response, "MrScraper fetch");
         }
-        return await readBoundedResponse(response, MAX_FETCH_RESPONSE_BYTES, "MrScraper fetch");
+        const body = await readBoundedResponse(response, query.screenshot === undefined ? MAX_FETCH_RESPONSE_BYTES : MAX_SCREENSHOT_RESPONSE_BYTES, "MrScraper fetch");
+        return (response.headers.get("content-type") ?? "").includes("application/json")
+            ? parsePageJson(body)
+            : { html: body };
     });
+    const { html } = page;
     const title = extractTitle(html);
     const plainText = htmlToPlainText(html);
     const maxChars = normalizeMaxChars(params.maxChars);
@@ -217,13 +320,8 @@ export async function runMrScraperFetchHtml(params) {
             source: "web_fetch",
             includeWarning: false,
         }),
+        ...(page.screenshot ? { screenshot: page.screenshot } : {}),
     };
-}
-function resolveSearchCount(count) {
-    if (typeof count !== "number" || !Number.isFinite(count)) {
-        return MIN_SEARCH_RESULTS;
-    }
-    return Math.min(MAX_SEARCH_RESULTS, Math.max(1, Math.floor(count)));
 }
 function resolveSiteName(url) {
     try {
@@ -255,23 +353,24 @@ function normalizeSearchResult(item) {
 }
 export async function runMrScraperWebSearch(params) {
     const query = params.query.trim();
-    if (!query) {
-        throw new Error("MrScraper web search needs a query.");
+    if (!query || [...query].length > MAX_SEARCH_QUERY_CHARS) {
+        throw new Error(`MrScraper web search query must be 1 to ${MAX_SEARCH_QUERY_CHARS} characters.`);
     }
     const country = resolveMrScraperSearchCountry(params.cfg, params.country);
-    if (country && !SEARCH_COUNTRY_PATTERN.test(country)) {
-        throw new Error(`MrScraper web search country must be a two-letter code such as us or gb, not "${country}".`);
-    }
-    const apiToken = requireMrScraperApiToken(params.cfg, "web_search (mrscraper)");
-    const count = resolveSearchCount(params.count);
-    const timeoutSeconds = resolveTimeoutSeconds(params.timeoutSeconds, resolveMrScraperSearchTimeoutSeconds(params.cfg));
+    // country and numResults are sent only when set; the API then searches from the United States
+    // and returns up to 10 results.
     const url = new URL(WEB_SEARCH_ENDPOINT);
     url.searchParams.set("action", "websearch");
     url.searchParams.set("query", query);
-    if (country) {
-        url.searchParams.set("country", country.toLowerCase());
+    if (country !== undefined) {
+        url.searchParams.set("country", countryCodeInput("web search country", country));
     }
-    url.searchParams.set("numResults", String(Math.max(count, MIN_SEARCH_RESULTS)));
+    if (params.numResults !== undefined) {
+        const numResults = integerInput("web search numResults", params.numResults, MIN_SEARCH_RESULTS, MAX_SEARCH_RESULTS);
+        url.searchParams.set("numResults", String(numResults));
+    }
+    const apiToken = requireMrScraperApiToken(params.cfg, "web_search (mrscraper)");
+    const timeoutSeconds = resolveMrScraperSearchTimeoutSeconds(params.cfg);
     const start = Date.now();
     const payload = await withStrictWebToolsEndpoint({
         url: url.toString(),
@@ -302,7 +401,7 @@ export async function runMrScraperWebSearch(params) {
     if (!Array.isArray(record.data)) {
         throw new Error("MrScraper web search response has no results list.");
     }
-    const results = record.data.flatMap(normalizeSearchResult).slice(0, count);
+    const results = record.data.flatMap(normalizeSearchResult).slice(0, params.count);
     return {
         query,
         provider: "mrscraper",
