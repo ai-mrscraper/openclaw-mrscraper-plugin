@@ -22,8 +22,12 @@ const {
   runMrScraperFetchHtml,
   runMrScraperGetAllResults,
   runMrScraperGetResultById,
+  runMrScraperGetScreenshot,
   runMrScraperRerunAiScraper,
   runMrScraperRerunManualScraper,
+  runMrScraperScrapeBrand,
+  runMrScraperScrapeJson,
+  runMrScraperScrapeMarkdown,
   runMrScraperWebSearch,
 } = vi.hoisted(() => ({
   runMrScraperBulkRerunAiScraper: vi.fn(async (params: Record<string, unknown>) => params),
@@ -32,8 +36,12 @@ const {
   runMrScraperCreateAiScraper: vi.fn(async (params: Record<string, unknown>) => params),
   runMrScraperGetAllResults: vi.fn(async (params: Record<string, unknown>) => params),
   runMrScraperGetResultById: vi.fn(async (params: Record<string, unknown>) => params),
+  runMrScraperGetScreenshot: vi.fn(async (params: Record<string, unknown>) => params),
   runMrScraperRerunAiScraper: vi.fn(async (params: Record<string, unknown>) => params),
   runMrScraperRerunManualScraper: vi.fn(async (params: Record<string, unknown>) => params),
+  runMrScraperScrapeBrand: vi.fn(async (params: Record<string, unknown>) => params),
+  runMrScraperScrapeJson: vi.fn(async (params: Record<string, unknown>) => params),
+  runMrScraperScrapeMarkdown: vi.fn(async (params: Record<string, unknown>) => params),
   runMrScraperWebSearch: vi.fn(async (params: Record<string, unknown>) => params),
 }));
 
@@ -48,8 +56,12 @@ vi.mock("./mrscraper-client.js", async () => {
     runMrScraperCreateAiScraper,
     runMrScraperGetAllResults,
     runMrScraperGetResultById,
+    runMrScraperGetScreenshot,
     runMrScraperRerunAiScraper,
     runMrScraperRerunManualScraper,
+    runMrScraperScrapeBrand,
+    runMrScraperScrapeJson,
+    runMrScraperScrapeMarkdown,
     runMrScraperWebSearch,
   };
 });
@@ -61,9 +73,13 @@ describe("mrscraper tools", () => {
   let createMrScraperFetchHtmlTool: typeof import("./mrscraper-fetch-tool.js").createMrScraperFetchHtmlTool;
   let createMrScraperGetAllResultsTool: typeof import("./mrscraper-get-all-results-tool.js").createMrScraperGetAllResultsTool;
   let createMrScraperGetResultByIdTool: typeof import("./mrscraper-get-result-by-id-tool.js").createMrScraperGetResultByIdTool;
+  let createMrScraperGetScreenshotTool: typeof import("./mrscraper-get-screenshot-tool.js").createMrScraperGetScreenshotTool;
   let createMrScraperRerunAiScraperTool: typeof import("./mrscraper-rerun-ai-scraper-tool.js").createMrScraperRerunAiScraperTool;
   let createMrScraperRerunManualScraperTool: typeof import("./mrscraper-rerun-manual-scraper-tool.js").createMrScraperRerunManualScraperTool;
   let createMrScraperScrapeTool: typeof import("./mrscraper-scrape-tool.js").createMrScraperScrapeTool;
+  let createMrScraperScrapeBrandTool: typeof import("./mrscraper-scrape-brand-tool.js").createMrScraperScrapeBrandTool;
+  let createMrScraperScrapeJsonTool: typeof import("./mrscraper-scrape-json-tool.js").createMrScraperScrapeJsonTool;
+  let createMrScraperScrapeMarkdownTool: typeof import("./mrscraper-scrape-markdown-tool.js").createMrScraperScrapeMarkdownTool;
   let mrscraperClientTesting: typeof import("./mrscraper-client.js").__testing;
   let createMrScraperWebSearchProvider: typeof import("./mrscraper-search-provider.js").createMrScraperWebSearchProvider;
   let createMrScraperWebSearchTool: typeof import("./mrscraper-web-search-tool.js").createMrScraperWebSearchTool;
@@ -77,10 +93,14 @@ describe("mrscraper tools", () => {
     ({ createMrScraperFetchHtmlTool } = await import("./mrscraper-fetch-tool.js"));
     ({ createMrScraperGetAllResultsTool } = await import("./mrscraper-get-all-results-tool.js"));
     ({ createMrScraperGetResultByIdTool } = await import("./mrscraper-get-result-by-id-tool.js"));
+    ({ createMrScraperGetScreenshotTool } = await import("./mrscraper-get-screenshot-tool.js"));
     ({ createMrScraperRerunAiScraperTool } = await import("./mrscraper-rerun-ai-scraper-tool.js"));
     ({ createMrScraperRerunManualScraperTool } =
       await import("./mrscraper-rerun-manual-scraper-tool.js"));
     ({ createMrScraperScrapeTool } = await import("./mrscraper-scrape-tool.js"));
+    ({ createMrScraperScrapeBrandTool } = await import("./mrscraper-scrape-brand-tool.js"));
+    ({ createMrScraperScrapeJsonTool } = await import("./mrscraper-scrape-json-tool.js"));
+    ({ createMrScraperScrapeMarkdownTool } = await import("./mrscraper-scrape-markdown-tool.js"));
     ({ createMrScraperWebSearchProvider } = await import("./mrscraper-search-provider.js"));
     ({ createMrScraperWebSearchTool } = await import("./mrscraper-web-search-tool.js"));
     ({ __testing: mrscraperClientTesting } =
@@ -114,6 +134,15 @@ describe("mrscraper tools", () => {
     runMrScraperRerunManualScraper.mockImplementation(
       async (params: Record<string, unknown>) => params,
     );
+    for (const run of [
+      runMrScraperGetScreenshot,
+      runMrScraperScrapeBrand,
+      runMrScraperScrapeJson,
+      runMrScraperScrapeMarkdown,
+    ]) {
+      run.mockReset();
+      run.mockImplementation(async (params: Record<string, unknown>) => params);
+    }
     runMrScraperWebSearch.mockReset();
     runMrScraperWebSearch.mockImplementation(async (params: Record<string, unknown>) => params);
     vi.unstubAllEnvs();
@@ -272,6 +301,241 @@ describe("mrscraper tools", () => {
       query: "web scraping api",
       country: "gb",
       numResults: 20,
+    });
+  });
+
+  it("gives each page and search tool exactly the spec inputs, in order, and the spec description", () => {
+    const api = { config: {} } as never;
+    const tools = [
+      createMrScraperFetchHtmlTool(api),
+      createMrScraperScrapeMarkdownTool(api),
+      createMrScraperGetScreenshotTool(api),
+      createMrScraperScrapeBrandTool(api),
+      createMrScraperScrapeJsonTool(api),
+      createMrScraperWebSearchTool(api),
+    ];
+
+    expect(
+      tools.map((tool) => ({
+        name: tool.name,
+        description: tool.description,
+        inputs: Object.keys(tool.parameters.properties),
+        required: tool.parameters.required,
+      })),
+    ).toEqual([
+      {
+        name: "mrscraper_fetch_html",
+        description:
+          "Retrieve the raw HTML of a page. Browser rendering and a screenshot are optional.",
+        inputs: [
+          "url",
+          "browserRendering",
+          "timeout",
+          "warmStart",
+          "blockResources",
+          "waitForSelector",
+          "geoCode",
+          "maxAge",
+          "maxRetries",
+          "screenshot",
+          "maxChars",
+        ],
+        required: ["url"],
+      },
+      {
+        name: "mrscraper_scrape_markdown",
+        description: "Retrieve a page as Markdown. Browser rendering is optional.",
+        inputs: [
+          "url",
+          "browserRendering",
+          "timeout",
+          "geoCode",
+          "warmStart",
+          "blockResources",
+          "waitForSelector",
+          "maxAge",
+          "maxRetries",
+        ],
+        required: ["url"],
+      },
+      {
+        name: "mrscraper_get_screenshot",
+        description:
+          "Capture a base64 PNG screenshot of the full page, the top viewport, or a custom viewport size. Browser rendering is always enabled.",
+        inputs: ["url", "screenshot", "timeout", "geoCode", "waitForSelector", "maxAge", "maxRetries"],
+        required: ["url"],
+      },
+      {
+        name: "mrscraper_scrape_brand",
+        description: "Extract a website's colors, typography, logos, and social links as JSON.",
+        inputs: ["url"],
+        required: ["url"],
+      },
+      {
+        name: "mrscraper_scrape_json",
+        description:
+          "Extract structured JSON from a page using a natural-language prompt. Append Json Schema: and a JSON schema to shape the output.",
+        inputs: [
+          "url",
+          "prompt",
+          "html",
+          "screenshot",
+          "browserRendering",
+          "waitForSelector",
+          "warmStart",
+          "blockResources",
+          "timeout",
+          "geoCode",
+          "maxAge",
+          "maxRetries",
+        ],
+        required: ["url"],
+      },
+      {
+        name: "mrscraper_web_search",
+        description:
+          "Search the web and return ranked results with titles, URLs, descriptions, and sources.",
+        inputs: ["query", "country", "numResults"],
+        required: ["query"],
+      },
+    ]);
+  });
+
+  it("passes the Scrape Markdown inputs of mrscraper_scrape_markdown to the request", async () => {
+    const signal = new AbortController().signal;
+    const tool = createMrScraperScrapeMarkdownTool({
+      config: { env: "test" },
+    } as never);
+
+    await tool.execute(
+      "call-1e",
+      {
+        url: "https://example.com/docs",
+        browserRendering: false,
+        timeout: 90,
+        geoCode: "de",
+        warmStart: true,
+        blockResources: true,
+        waitForSelector: "main",
+        maxAge: 0,
+        maxRetries: 1,
+      },
+      signal,
+    );
+
+    expect(runMrScraperScrapeMarkdown).toHaveBeenCalledWith({
+      cfg: { env: "test" },
+      url: "https://example.com/docs",
+      browserRendering: false,
+      timeout: 90,
+      geoCode: "de",
+      warmStart: true,
+      blockResources: true,
+      waitForSelector: "main",
+      maxAge: 0,
+      maxRetries: 1,
+      signal,
+    });
+  });
+
+  it("passes the Get Screenshot inputs and returns the screenshot as an image block", async () => {
+    runMrScraperGetScreenshot.mockResolvedValueOnce({
+      url: "https://example.com",
+      operation: "get_screenshot",
+      screenshot: { data: "iVBORw0KGgo=", mimeType: "image/png" },
+    });
+    const tool = createMrScraperGetScreenshotTool({
+      config: { env: "test" },
+    } as never);
+
+    const result = await tool.execute("call-1f", {
+      url: "https://example.com",
+      screenshot: "top",
+      timeout: 60,
+      geoCode: "gb",
+      waitForSelector: "#hero",
+      maxAge: 86_400_000,
+      maxRetries: 2,
+    });
+
+    expect(runMrScraperGetScreenshot).toHaveBeenCalledWith({
+      cfg: { env: "test" },
+      url: "https://example.com",
+      screenshot: "top",
+      timeout: 60,
+      geoCode: "gb",
+      waitForSelector: "#hero",
+      maxAge: 86_400_000,
+      maxRetries: 2,
+    });
+    expect(result.content).toEqual([
+      {
+        type: "text",
+        text: JSON.stringify({ url: "https://example.com", operation: "get_screenshot" }, null, 2),
+      },
+      { type: "image", data: "iVBORw0KGgo=", mimeType: "image/png" },
+    ]);
+  });
+
+  it("passes only the url of mrscraper_scrape_brand to the request", async () => {
+    const tool = createMrScraperScrapeBrandTool({
+      config: { env: "test" },
+    } as never);
+
+    await tool.execute("call-1g", { url: "https://mrscraper.com" });
+
+    expect(runMrScraperScrapeBrand).toHaveBeenCalledWith({
+      cfg: { env: "test" },
+      url: "https://mrscraper.com",
+    });
+  });
+
+  it("passes the Scrape JSON inputs and returns a screenshot as an image block", async () => {
+    runMrScraperScrapeJson.mockResolvedValueOnce({
+      url: "https://example.com/item",
+      operation: "scrape_json",
+      response: "data",
+      screenshot: { data: "/9j/4AAQ", mimeType: "image/jpeg" },
+    });
+    const tool = createMrScraperScrapeJsonTool({
+      config: { env: "test" },
+    } as never);
+
+    const result = await tool.execute("call-1h", {
+      url: "https://example.com/item",
+      prompt: "title and price",
+      html: false,
+      screenshot: true,
+      browserRendering: true,
+      waitForSelector: ".price",
+      warmStart: false,
+      blockResources: true,
+      timeout: 200,
+      geoCode: "sg",
+      maxAge: 60_000,
+      maxRetries: 0,
+    });
+
+    expect(runMrScraperScrapeJson).toHaveBeenCalledWith({
+      cfg: { env: "test" },
+      url: "https://example.com/item",
+      prompt: "title and price",
+      html: false,
+      screenshot: true,
+      browserRendering: true,
+      waitForSelector: ".price",
+      warmStart: false,
+      blockResources: true,
+      timeout: 200,
+      geoCode: "sg",
+      maxAge: 60_000,
+      maxRetries: 0,
+    });
+    expect(result.content.at(-1)).toEqual({ type: "image", data: "/9j/4AAQ", mimeType: "image/jpeg" });
+    expect(result.details).toEqual({
+      url: "https://example.com/item",
+      operation: "scrape_json",
+      response: "data",
     });
   });
 

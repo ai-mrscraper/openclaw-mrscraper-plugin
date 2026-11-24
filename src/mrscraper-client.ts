@@ -25,8 +25,8 @@ import {
 const ALLOWED_SCRAPER_API_HOSTS = new Set(["api.mrscraper.com"]);
 const ALLOWED_PLATFORM_HOSTS = new Set(["api.app.mrscraper.com"]);
 const DEFAULT_FETCH_MAX_CHARS = 50_000;
-const MAX_FETCH_RESPONSE_BYTES = 5_000_000;
-// A screenshot arrives as base64 image data next to the HTML.
+const MAX_PAGE_RESPONSE_BYTES = 5_000_000;
+// A screenshot arrives as base64 image data, next to the HTML when there is any.
 const MAX_SCREENSHOT_RESPONSE_BYTES = 25_000_000;
 const MAX_PLATFORM_RESPONSE_BYTES = 5_000_000;
 const MAX_ERROR_RESPONSE_BYTES = 64_000;
@@ -36,18 +36,22 @@ const MAX_SEARCH_RESPONSE_BYTES = 1_000_000;
 const DEFAULT_PAGE_TIMEOUT_SECONDS = 300;
 const PAGE_DEADLINE_MARGIN_SECONDS = 30;
 const MAX_PAGE_TIMEOUT_SECONDS = 330;
+const BRAND_TIMEOUT_SECONDS = 120;
 // maxAge accepts up to 7 days, in milliseconds.
 const MAX_AGE_MS = 604_800_000;
 const MAX_WAIT_FOR_SELECTOR_CHARS = 500;
 const MAX_SEARCH_QUERY_CHARS = 1_000;
 const MIN_SEARCH_RESULTS = 10;
 const MAX_SEARCH_RESULTS = 100;
+// The API edge refuses longer request URLs, so a longer Scrape JSON request goes by POST.
+const MAX_GET_URL_CHARS = 8_000;
 const COUNTRY_CODE_PATTERN = /^[a-z]{2}$/i;
 // full, top, or <width>x<height> with an optional -<zoom> percent.
 const SCREENSHOT_PATTERN = /^(full|top|[0-9]{3,4}x[0-9]{3,4}(-[0-9]{2,3})?)$/;
-const WEB_SEARCH_ENDPOINT = `${DEFAULT_MRSCRAPER_SCRAPER_API_BASE_URL}/`;
+const SCRAPER_API_ENDPOINT = `${DEFAULT_MRSCRAPER_SCRAPER_API_BASE_URL}/`;
 
-export type MrScraperFetchHtmlParams = {
+/** Page inputs from the MrScraper API docs. Each is sent only when set; maxAge is 0 unless set. */
+export type MrScraperPageParams = {
   cfg?: OpenClawConfig;
   url: string;
   browserRendering?: boolean;
@@ -58,9 +62,37 @@ export type MrScraperFetchHtmlParams = {
   geoCode?: string;
   maxAge?: number;
   maxRetries?: number;
+  signal?: AbortSignal;
+};
+
+export type MrScraperFetchHtmlParams = MrScraperPageParams & {
   screenshot?: string;
   maxChars?: number;
   extractMode?: "markdown" | "text";
+};
+
+export type MrScraperScrapeMarkdownParams = MrScraperPageParams;
+
+export type MrScraperGetScreenshotParams = Omit<
+  MrScraperPageParams,
+  "browserRendering" | "warmStart" | "blockResources"
+> & {
+  /** full (the default), top, or <width>x<height> with an optional -<zoom>. */
+  screenshot?: string;
+};
+
+export type MrScraperScrapeBrandParams = {
+  cfg?: OpenClawConfig;
+  url: string;
+  signal?: AbortSignal;
+};
+
+export type MrScraperScrapeJsonParams = MrScraperPageParams & {
+  prompt?: string;
+  /** Defaults to true. */
+  html?: boolean;
+  /** Defaults to false. */
+  screenshot?: boolean;
 };
 
 /** A page screenshot: base64 image data and its media type. */
@@ -336,7 +368,7 @@ function truncate(value: string, maxChars: number): { text: string; truncated: b
   };
 }
 
-function pageUrlInput(value: string): string {
+function pageUrlInput(name: string, value: string): string {
   let parsed: URL | undefined;
   try {
     parsed = new URL(value);
@@ -345,7 +377,7 @@ function pageUrlInput(value: string): string {
   }
   if (!parsed || (parsed.protocol !== "http:" && parsed.protocol !== "https:")) {
     throw new Error(
-      "MrScraper fetch url must be an absolute HTTP or HTTPS URL that includes the protocol, such as https://example.com.",
+      `MrScraper ${name} url must be an absolute HTTP or HTTPS URL that includes the protocol, such as https://example.com.`,
     );
   }
   return value;
@@ -369,11 +401,11 @@ function countryCodeInput(name: string, value: string): string {
   return value.toLowerCase();
 }
 
-function waitForSelectorInput(value: string): string {
+function waitForSelectorInput(name: string, value: string): string {
   const selector = value.trim();
   if (!selector || [...selector].length > MAX_WAIT_FOR_SELECTOR_CHARS) {
     throw new Error(
-      `MrScraper fetch waitForSelector must be 1 to ${MAX_WAIT_FOR_SELECTOR_CHARS} characters.`,
+      `MrScraper ${name} waitForSelector must be 1 to ${MAX_WAIT_FOR_SELECTOR_CHARS} characters.`,
     );
   }
   return selector;
@@ -396,68 +428,141 @@ function isScreenshotArea(value: string): boolean {
   );
 }
 
-function screenshotInput(value: string): string {
+function screenshotInput(name: string, value: string): string {
   if (!isScreenshotArea(value)) {
     throw new Error(
-      "MrScraper fetch screenshot must be full, top, or <width>x<height> with an optional -<zoom>, such as 1280x800 or 1920x1080-75 (width and height 100 to 3840, zoom 25 to 300).",
+      `MrScraper ${name} screenshot must be full, top, or <width>x<height> with an optional -<zoom>, such as 1280x800 or 1920x1080-75 (width and height 100 to 3840, zoom 25 to 300).`,
     );
   }
   return value;
 }
 
-type PageContent = { html: string; screenshot?: MrScraperScreenshot };
-
-// With a screenshot, the API answers JSON holding the html and the base64 image.
-function parsePageJson(body: string): PageContent {
-  const payload: unknown = JSON.parse(body);
-  const record =
-    payload && typeof payload === "object" && !Array.isArray(payload)
-      ? (payload as Record<string, unknown>)
-      : {};
-  const html = typeof record.html === "string" ? record.html : "";
-  const data = typeof record.screenshot === "string" ? record.screenshot.trim() : "";
-  if (!data) {
-    return { html };
-  }
-  // Base64 JPEG data starts with /9j/; the documented format is PNG.
+// Validated page inputs. Each one is undefined when unset, so it is not sent and the API default
+// applies, except maxAge, which is 0 (always scrape fresh) unless set.
+function pageInputs(name: string, params: MrScraperPageParams) {
   return {
-    html,
-    screenshot: { data, mimeType: data.startsWith("/9j/") ? "image/jpeg" : "image/png" },
-  };
-}
-
-export async function runMrScraperFetchHtml(
-  params: MrScraperFetchHtmlParams,
-): Promise<Record<string, unknown> & { screenshot?: MrScraperScreenshot }> {
-  const timeout = resolveMrScraperFetchTimeout(params.cfg, params.timeout);
-  const geoCode = resolveMrScraperGeoCode(params.cfg, params.geoCode);
-  // Optional inputs are sent only when set, so the API defaults apply to the rest. maxAge is
-  // always sent (0, a fresh scrape, unless set), and every result is saved to the account.
-  const query: Record<string, string | number | boolean | undefined> = {
-    url: pageUrlInput(params.url),
+    url: pageUrlInput(name, params.url),
     browserRendering: params.browserRendering,
     timeout:
-      timeout === undefined
+      params.timeout === undefined
         ? undefined
-        : integerInput("fetch timeout", timeout, 1, MAX_PAGE_TIMEOUT_SECONDS),
+        : integerInput(`${name} timeout`, params.timeout, 1, MAX_PAGE_TIMEOUT_SECONDS),
     warmStart: params.warmStart,
-    blockResources: resolveMrScraperBlockResources(params.cfg, params.blockResources),
+    blockResources: params.blockResources,
     waitForSelector:
-      params.waitForSelector === undefined ? undefined : waitForSelectorInput(params.waitForSelector),
-    geoCode: geoCode === undefined ? undefined : countryCodeInput("fetch geoCode", geoCode),
-    maxAge: integerInput("fetch maxAge", params.maxAge ?? 0, 0, MAX_AGE_MS),
+      params.waitForSelector === undefined
+        ? undefined
+        : waitForSelectorInput(name, params.waitForSelector),
+    geoCode:
+      params.geoCode === undefined ? undefined : countryCodeInput(`${name} geoCode`, params.geoCode),
+    maxAge: integerInput(`${name} maxAge`, params.maxAge ?? 0, 0, MAX_AGE_MS),
     maxRetries:
       params.maxRetries === undefined
         ? undefined
-        : integerInput("fetch maxRetries", params.maxRetries, 0),
-    screenshot: params.screenshot === undefined ? undefined : screenshotInput(params.screenshot),
-    html: true,
-    markdown: false,
-    saveResult: true,
+        : integerInput(`${name} maxRetries`, params.maxRetries, 0),
   };
-  const apiToken = requireMrScraperApiToken(params.cfg, "web_fetch (mrscraper)");
+}
 
-  const url = new URL(
+type Query = Record<string, string | number | boolean | undefined>;
+
+/** The Scraper API URL with every set value in the query string, in the given order. */
+function scraperApiUrl(query: Query, base = SCRAPER_API_ENDPOINT): string {
+  const url = new URL(base);
+  for (const [key, value] of Object.entries(query)) {
+    if (value !== undefined) {
+      url.searchParams.set(key, String(value));
+    }
+  }
+  return url.toString();
+}
+
+// The HTTP deadline of a page request: its timeout (the API's 300 seconds when unset) plus 30.
+function pageDeadlineSeconds(timeout?: number): number {
+  return (timeout ?? DEFAULT_PAGE_TIMEOUT_SECONDS) + PAGE_DEADLINE_MARGIN_SECONDS;
+}
+
+async function callScraperApi(params: {
+  cfg?: OpenClawConfig;
+  consumer: string;
+  label: string;
+  url: string;
+  timeoutSeconds: number;
+  maxBytes: number;
+  signal?: AbortSignal;
+  /** JSON body of a POST; without one the request is a GET. */
+  body?: Record<string, unknown>;
+}): Promise<{ body: string; json: boolean }> {
+  const apiToken = normalizeSecretInput(requireMrScraperApiToken(params.cfg, params.consumer));
+  return await withStrictWebToolsEndpoint(
+    {
+      url: params.url,
+      timeoutSeconds: params.timeoutSeconds,
+      signal: params.signal,
+      init: params.body
+        ? {
+            method: "POST",
+            headers: { "content-type": "application/json", "x-api-token": apiToken },
+            body: JSON.stringify(params.body),
+          }
+        : { headers: { "x-api-token": apiToken } },
+    },
+    async ({ response }) => {
+      if (!response.ok) {
+        await throwHttpError(response, params.label);
+      }
+      return {
+        body: await readBoundedResponse(response, params.maxBytes, params.label),
+        json: (response.headers.get("content-type") ?? "").includes("application/json"),
+      };
+    },
+  );
+}
+
+function parseJsonObject(body: string, label: string): Record<string, unknown> {
+  const payload: unknown = JSON.parse(body);
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    throw new Error(`${label} response must be a JSON object.`);
+  }
+  return payload as Record<string, unknown>;
+}
+
+// Base64 JPEG data starts with /9j/; the documented format is PNG.
+function screenshotImage(value: unknown): MrScraperScreenshot | undefined {
+  const data = typeof value === "string" ? value.trim() : "";
+  return data
+    ? { data, mimeType: data.startsWith("/9j/") ? "image/jpeg" : "image/png" }
+    : undefined;
+}
+
+/** Retrieve the raw HTML of a page. Browser rendering and a screenshot are optional. */
+export async function runMrScraperFetchHtml(
+  params: MrScraperFetchHtmlParams,
+): Promise<Record<string, unknown> & { screenshot?: MrScraperScreenshot }> {
+  // The webFetch config fills in timeout, geoCode, and blockResources when the call leaves them out.
+  const page = pageInputs("fetch", {
+    ...params,
+    timeout: resolveMrScraperFetchTimeout(params.cfg, params.timeout),
+    geoCode: resolveMrScraperGeoCode(params.cfg, params.geoCode),
+    blockResources: resolveMrScraperBlockResources(params.cfg, params.blockResources),
+  });
+  const screenshot =
+    params.screenshot === undefined ? undefined : screenshotInput("fetch", params.screenshot);
+  const url = scraperApiUrl(
+    {
+      url: page.url,
+      browserRendering: page.browserRendering,
+      timeout: page.timeout,
+      warmStart: page.warmStart,
+      blockResources: page.blockResources,
+      waitForSelector: page.waitForSelector,
+      geoCode: page.geoCode,
+      maxAge: page.maxAge,
+      maxRetries: page.maxRetries,
+      screenshot,
+      html: true,
+      markdown: false,
+      saveResult: true,
+    },
     resolveEndpoint({
       baseUrl: resolveMrScraperFetchBaseUrl(params.cfg),
       defaultBaseUrl: "https://api.mrscraper.com",
@@ -465,35 +570,22 @@ export async function runMrScraperFetchHtml(
       product: "MrScraper fetch",
     }),
   );
-  for (const [key, value] of Object.entries(query)) {
-    if (value !== undefined) {
-      url.searchParams.set(key, String(value));
-    }
-  }
 
   const start = Date.now();
-  const page = await withStrictWebToolsEndpoint(
-    {
-      url: url.toString(),
-      timeoutSeconds: (timeout ?? DEFAULT_PAGE_TIMEOUT_SECONDS) + PAGE_DEADLINE_MARGIN_SECONDS,
-      init: { headers: { "x-api-token": normalizeSecretInput(apiToken) } },
-    },
-    async ({ response }): Promise<PageContent> => {
-      if (!response.ok) {
-        await throwHttpError(response, "MrScraper fetch");
-      }
-      const body = await readBoundedResponse(
-        response,
-        query.screenshot === undefined ? MAX_FETCH_RESPONSE_BYTES : MAX_SCREENSHOT_RESPONSE_BYTES,
-        "MrScraper fetch",
-      );
-      return (response.headers.get("content-type") ?? "").includes("application/json")
-        ? parsePageJson(body)
-        : { html: body };
-    },
-  );
+  const response = await callScraperApi({
+    cfg: params.cfg,
+    consumer: "web_fetch (mrscraper)",
+    label: "MrScraper fetch",
+    url,
+    timeoutSeconds: pageDeadlineSeconds(page.timeout),
+    maxBytes: screenshot === undefined ? MAX_PAGE_RESPONSE_BYTES : MAX_SCREENSHOT_RESPONSE_BYTES,
+    signal: params.signal,
+  });
+  // With a screenshot, the API answers JSON holding the html and the base64 image.
+  const record = response.json ? parseJsonObject(response.body, "MrScraper fetch") : undefined;
+  const html = record ? (typeof record.html === "string" ? record.html : "") : response.body;
+  const image = screenshotImage(record?.screenshot);
 
-  const { html } = page;
   const title = extractTitle(html);
   const plainText = htmlToPlainText(html);
   const maxChars = normalizeMaxChars(params.maxChars);
@@ -519,7 +611,195 @@ export async function runMrScraperFetchHtml(
       source: "web_fetch",
       includeWarning: false,
     }),
-    ...(page.screenshot ? { screenshot: page.screenshot } : {}),
+    ...(image ? { screenshot: image } : {}),
+  };
+}
+
+/** Retrieve a page as Markdown. Browser rendering is optional. */
+export async function runMrScraperScrapeMarkdown(
+  params: MrScraperScrapeMarkdownParams,
+): Promise<Record<string, unknown>> {
+  const page = pageInputs("Scrape Markdown", params);
+  const url = scraperApiUrl({
+    url: page.url,
+    browserRendering: page.browserRendering,
+    timeout: page.timeout,
+    geoCode: page.geoCode,
+    warmStart: page.warmStart,
+    blockResources: page.blockResources,
+    waitForSelector: page.waitForSelector,
+    maxAge: page.maxAge,
+    maxRetries: page.maxRetries,
+    markdown: true,
+    html: false,
+    screenshot: false,
+    saveResult: true,
+  });
+
+  const start = Date.now();
+  const response = await callScraperApi({
+    cfg: params.cfg,
+    consumer: "mrscraper_scrape_markdown",
+    label: "MrScraper Scrape Markdown",
+    url,
+    timeoutSeconds: pageDeadlineSeconds(page.timeout),
+    maxBytes: MAX_PAGE_RESPONSE_BYTES,
+    signal: params.signal,
+  });
+  const record = response.json
+    ? parseJsonObject(response.body, "MrScraper Scrape Markdown")
+    : undefined;
+  const markdown = record
+    ? typeof record.markdown === "string"
+      ? record.markdown
+      : ""
+    : response.body;
+
+  return {
+    url: params.url,
+    provider: "mrscraper",
+    operation: "scrape_markdown",
+    tookMs: Date.now() - start,
+    markdown: wrapExternalContent(markdown, { source: "web_fetch", includeWarning: false }),
+  };
+}
+
+/**
+ * Capture a base64 PNG screenshot of the full page, the top viewport, or a custom viewport size.
+ * Browser rendering is always enabled.
+ */
+export async function runMrScraperGetScreenshot(
+  params: MrScraperGetScreenshotParams,
+): Promise<Record<string, unknown> & { screenshot: MrScraperScreenshot }> {
+  const page = pageInputs("Get Screenshot", params);
+  const url = scraperApiUrl({
+    url: page.url,
+    screenshot: screenshotInput("Get Screenshot", params.screenshot ?? "full"),
+    timeout: page.timeout,
+    geoCode: page.geoCode,
+    waitForSelector: page.waitForSelector,
+    maxAge: page.maxAge,
+    maxRetries: page.maxRetries,
+    browserRendering: true,
+    html: false,
+    markdown: false,
+    saveResult: true,
+  });
+
+  const start = Date.now();
+  const response = await callScraperApi({
+    cfg: params.cfg,
+    consumer: "mrscraper_get_screenshot",
+    label: "MrScraper Get Screenshot",
+    url,
+    timeoutSeconds: pageDeadlineSeconds(page.timeout),
+    maxBytes: MAX_SCREENSHOT_RESPONSE_BYTES,
+    signal: params.signal,
+  });
+  const image = screenshotImage(
+    parseJsonObject(response.body, "MrScraper Get Screenshot").screenshot,
+  );
+  if (!image) {
+    throw new Error("MrScraper Get Screenshot response has no screenshot.");
+  }
+
+  return {
+    url: params.url,
+    provider: "mrscraper",
+    operation: "get_screenshot",
+    tookMs: Date.now() - start,
+    screenshot: image,
+  };
+}
+
+/** Extract a website's colors, typography, logos, and social links as JSON. */
+export async function runMrScraperScrapeBrand(
+  params: MrScraperScrapeBrandParams,
+): Promise<Record<string, unknown>> {
+  const url = scraperApiUrl({
+    action: "brand-scraping",
+    url: pageUrlInput("Scrape Brand", params.url),
+    bundle: "none",
+  });
+
+  const start = Date.now();
+  const response = await callScraperApi({
+    cfg: params.cfg,
+    consumer: "mrscraper_scrape_brand",
+    label: "MrScraper Scrape Brand",
+    url,
+    timeoutSeconds: BRAND_TIMEOUT_SECONDS,
+    maxBytes: MAX_PAGE_RESPONSE_BYTES,
+    signal: params.signal,
+  });
+  const payload = parseJsonObject(response.body, "MrScraper Scrape Brand");
+
+  return {
+    url: params.url,
+    provider: "mrscraper",
+    operation: "scrape_brand",
+    tookMs: Date.now() - start,
+    response: wrapExternalContent(JSON.stringify(payload), { source: "web_fetch" }),
+  };
+}
+
+/**
+ * Extract structured JSON from a page using a natural-language prompt. Append Json Schema: and a
+ * JSON schema to shape the output.
+ */
+export async function runMrScraperScrapeJson(
+  params: MrScraperScrapeJsonParams,
+): Promise<Record<string, unknown> & { screenshot?: MrScraperScreenshot }> {
+  const page = pageInputs("Scrape JSON", params);
+  if (params.prompt !== undefined && !params.prompt.trim()) {
+    throw new Error("MrScraper Scrape JSON prompt must not be empty.");
+  }
+  const screenshot = params.screenshot ?? false;
+  // Sent as query parameters by GET and by POST alike.
+  const settings: Query = {
+    html: params.html ?? true,
+    screenshot,
+    browserRendering: page.browserRendering,
+    waitForSelector: page.waitForSelector,
+    warmStart: page.warmStart,
+    blockResources: page.blockResources,
+    timeout: page.timeout,
+    geoCode: page.geoCode,
+    maxAge: page.maxAge,
+    maxRetries: page.maxRetries,
+  };
+  const getUrl = scraperApiUrl({
+    url: page.url,
+    prompt: params.prompt,
+    ...settings,
+    agent: "general",
+    saveResult: true,
+  });
+  // A request URL over 8,000 characters goes by POST: url, prompt, and agent in the JSON body,
+  // the other settings in the query.
+  const post = getUrl.length > MAX_GET_URL_CHARS;
+
+  const start = Date.now();
+  const response = await callScraperApi({
+    cfg: params.cfg,
+    consumer: "mrscraper_scrape_json",
+    label: "MrScraper Scrape JSON",
+    url: post ? scraperApiUrl({ ...settings, saveResult: true }) : getUrl,
+    body: post ? { url: page.url, prompt: params.prompt, agent: "general" } : undefined,
+    timeoutSeconds: pageDeadlineSeconds(page.timeout),
+    maxBytes: screenshot ? MAX_SCREENSHOT_RESPONSE_BYTES : MAX_PAGE_RESPONSE_BYTES,
+    signal: params.signal,
+  });
+  const { screenshot: data, ...payload } = parseJsonObject(response.body, "MrScraper Scrape JSON");
+  const image = screenshotImage(data);
+
+  return {
+    url: params.url,
+    provider: "mrscraper",
+    operation: "scrape_json",
+    tookMs: Date.now() - start,
+    response: wrapExternalContent(JSON.stringify(payload), { source: "web_fetch" }),
+    ...(image ? { screenshot: image } : {}),
   };
 }
 
@@ -563,7 +843,7 @@ export async function runMrScraperWebSearch(
   const country = resolveMrScraperSearchCountry(params.cfg, params.country);
   // country and numResults are sent only when set; the API then searches from the United States
   // and returns up to 10 results.
-  const url = new URL(WEB_SEARCH_ENDPOINT);
+  const url = new URL(SCRAPER_API_ENDPOINT);
   url.searchParams.set("action", "websearch");
   url.searchParams.set("query", query);
   if (country !== undefined) {

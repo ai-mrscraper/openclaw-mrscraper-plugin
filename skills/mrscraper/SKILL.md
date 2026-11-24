@@ -1,6 +1,6 @@
 ---
 name: mrscraper
-description: MrScraper web search, page fetch, and AI scraping tools for search results, raw page HTML, and structured extraction.
+description: MrScraper web search, page, screenshot, and AI scraping tools for search results, page HTML and Markdown, screenshots, brand data, and structured extraction.
 metadata:
   { "openclaw": { "emoji": "🕸️", "requires": { "config": ["plugins.entries.mrscraper.enabled"] } } }
 ---
@@ -15,7 +15,11 @@ metadata:
 | Up to 100 search results          | `mrscraper_web_search`                | Need more than 10 results                                           |
 | JS-heavy page fetch               | `web_fetch`                           | MrScraper can back up `web_fetch` in non-sandboxed sessions         |
 | Raw HTML plus extracted text      | `mrscraper_fetch_html`                | Need page options such as `waitForSelector`, `geoCode`, or a screenshot |
-| AI-powered structured extraction  | `mrscraper_scrape`                    | Need schema-free extraction from plain-language instructions        |
+| Page as Markdown                  | `mrscraper_scrape_markdown`           | Need readable page content with page options                        |
+| Page screenshot                   | `mrscraper_get_screenshot`            | Need to see the full page, the first viewport, or a set viewport    |
+| Brand colors, fonts, and logos    | `mrscraper_scrape_brand`              | Need a website's brand assets and social links                      |
+| Structured JSON from one page     | `mrscraper_scrape_json`               | Need fields from one page, optionally shaped by a JSON schema       |
+| AI-powered structured extraction  | `mrscraper_scrape`                    | Need a reusable AI scraper from plain-language instructions         |
 | Reuse an AI scraper               | `mrscraper_rerun_ai_scraper`          | Apply an existing AI scraper to a new page or crawl target          |
 | Batch AI reruns                   | `mrscraper_bulk_rerun_ai_scraper`     | Reuse one AI scraper across many URLs                               |
 | Reuse a manual scraper            | `mrscraper_rerun_manual_scraper`      | Apply a dashboard manual scraper to a new URL                       |
@@ -81,9 +85,76 @@ comes back as an image.
 | `maxChars` | Maximum characters to return. |
 
 Leave out the inputs you do not need: they are not sent, and MrScraper's defaults
-apply. Every page request (this tool and `web_fetch`) sends `maxAge` (0 unless
-set) and `saveResult=true`, so each fetched page is saved to the MrScraper
-account's results.
+apply. Every page request (`web_fetch`, `mrscraper_fetch_html`,
+`mrscraper_scrape_markdown`, `mrscraper_get_screenshot`, and
+`mrscraper_scrape_json`) sends `maxAge` (0 unless set) and `saveResult=true`, so
+each page is saved to the MrScraper account's results. This tool also sends
+`html=true` and `markdown=false`.
+
+## mrscraper_scrape_markdown
+
+Retrieve a page as Markdown. Browser rendering is optional. Requests also send
+`markdown=true`, `html=false`, and `screenshot=false`.
+
+| Parameter | Description |
+| --- | --- |
+| `url` | URL of the page to scrape. Must include the protocol (https://). Required. |
+| `browserRendering` | Controls whether the page is loaded in a browser. Leave it out to load the page without a browser first and switch to a browser automatically if the request is blocked. Set true to always load the page in a browser, which JavaScript-heavy sites, SPAs, and pages that load content dynamically need. Set false to never use a browser. |
+| `timeout` | Maximum seconds to wait for the scrape before the request times out, from 1 to 330. Increase for slow or complex pages. Defaults to 300. |
+| `geoCode` | Two-letter country code to load the page from, such as us or gb. Defaults to the United States. |
+| `warmStart` | Opens the site's home page first to warm the session before loading the target URL. Useful for sites that expect a normal browsing session before deeper pages. |
+| `blockResources` | Blocks images, fonts, and stylesheets from loading. Speeds up scraping and reduces bandwidth usage. |
+| `waitForSelector` | Waits until a specific CSS selector or text appears on the page before returning it, such as #results. Up to 500 characters. Useful for content that loads asynchronously after the initial page load. |
+| `maxAge` | Serves a cached result of the same request when it is newer than this age, in milliseconds, such as 86400000 for 1 day. Up to 604800000 (7 days). 0, the default, always scrapes fresh. A cached result costs the same tokens as the original scrape. |
+| `maxRetries` | Maximum number of retries for the request. Omit for no limit. |
+
+## mrscraper_get_screenshot
+
+Capture a base64 PNG screenshot of the full page, the top viewport, or a custom
+viewport size. Browser rendering is always enabled. The screenshot comes back as
+an image. Requests also send `browserRendering=true`, `html=false`, and
+`markdown=false`.
+
+| Parameter | Description |
+| --- | --- |
+| `url` | URL of the page to scrape. Must include the protocol (https://). Required. |
+| `screenshot` | Screenshot area: `full` captures the entire scroll height (the default), `top` captures the first viewport, and `<width>x<height>` sets the viewport size in pixels with an optional `-<zoom>` percent, such as `1280x800` or `1920x1080-75`. Width and height range from 100 to 3840, zoom from 25 to 300. The image is a base64-encoded PNG. |
+| `timeout` | Maximum seconds to wait for the scrape before the request times out, from 1 to 330. Increase for slow or complex pages. Defaults to 300. |
+| `geoCode` | Two-letter country code to load the page from, such as us or gb. Defaults to the United States. |
+| `waitForSelector` | Waits until a specific CSS selector or text appears on the page before returning it, such as #results. Up to 500 characters. Useful for content that loads asynchronously after the initial page load. |
+| `maxAge` | Serves a cached result of the same request when it is newer than this age, in milliseconds, such as 86400000 for 1 day. Up to 604800000 (7 days). 0, the default, always scrapes fresh. A cached result costs the same tokens as the original scrape. |
+| `maxRetries` | Maximum number of retries for the request. Omit for no limit. |
+
+## mrscraper_scrape_brand
+
+Extract a website's colors, typography, logos, and social links as JSON. The
+brand is in `data.brand`. Requests send `action=brand-scraping` and
+`bundle=none` with the URL.
+
+| Parameter | Description |
+| --- | --- |
+| `url` | URL of the page to scrape. Must include the protocol (https://). Required. |
+
+## mrscraper_scrape_json
+
+Extract structured JSON from a page using a natural-language prompt. Append Json
+Schema: and a JSON schema to shape the output. The extracted data is in `data`,
+and a screenshot comes back as an image. Requests also send `agent=general`.
+
+| Parameter | Description |
+| --- | --- |
+| `url` | URL of the page to scrape. Must include the protocol (https://). Required. |
+| `prompt` | Description of the data shape you want back, for example fields like title, price, and rating. The prompt only parses the scraped content; it cannot instruct the scraper itself. To shape the output with a JSON schema, append it to the prompt as a Json Schema: section. Defaults to "Extract all data as complete as possible." |
+| `html` | Returns the raw HTML of the scraped page in the response. On by default; set false to leave it out. |
+| `screenshot` | Captures a screenshot of the rendered page as a base64-encoded image. Useful for verifying what the scraper actually saw. Off by default. |
+| `browserRendering` | Controls whether the page is loaded in a browser. Leave it out to load the page without a browser first and switch to a browser automatically if the request is blocked. Set true to always load the page in a browser, which JavaScript-heavy sites, SPAs, and pages that load content dynamically need. Set false to never use a browser. |
+| `waitForSelector` | Waits until a specific CSS selector or text appears on the page before returning it, such as #results. Up to 500 characters. Useful for content that loads asynchronously after the initial page load. |
+| `warmStart` | Opens the site's home page first to warm the session before loading the target URL. Useful for sites that expect a normal browsing session before deeper pages. |
+| `blockResources` | Blocks images, fonts, and stylesheets from loading. Speeds up scraping and reduces bandwidth usage. |
+| `timeout` | Maximum seconds to wait for the scrape before the request times out, from 1 to 330. Increase for slow or complex pages. Defaults to 300. |
+| `geoCode` | Two-letter country code to load the page from, such as us or gb. Defaults to the United States. |
+| `maxAge` | Serves a cached result of the same request when it is newer than this age, in milliseconds, such as 86400000 for 1 day. Up to 604800000 (7 days). 0, the default, always scrapes fresh. A cached result costs the same tokens as the original scrape. |
+| `maxRetries` | Maximum number of retries for the request. Omit for no limit. |
 
 ## mrscraper_scrape
 
@@ -169,8 +240,8 @@ Fetch one detailed result object by result ID.
 ## Tips
 
 - Use `web_search` or `mrscraper_web_search` to find pages, then fetch or scrape the ones you need.
-- Start with `web_fetch` in a non-sandboxed session or `mrscraper_fetch_html` when you mainly need page contents.
-- Use `mrscraper_scrape` when you need structured extracted data instead of raw page text.
+- Start with `web_fetch` in a non-sandboxed session, `mrscraper_scrape_markdown`, or `mrscraper_fetch_html` when you mainly need page contents.
+- Use `mrscraper_scrape_json` for structured data from one page, and `mrscraper_scrape` to create a reusable AI scraper.
 - Use the rerun tools once you already have a saved scraper ID and want to reuse it.
 - Use the result tools when you need to inspect prior jobs rather than launch a new scrape.
 - Prefer the `map` agent only when the task really needs multi-page crawling.

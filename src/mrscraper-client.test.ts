@@ -24,6 +24,10 @@ vi.mock("openclaw/plugin-sdk/provider-web-fetch", () => ({
 import {
   runMrScraperFetchHtml,
   runMrScraperGetResultById,
+  runMrScraperGetScreenshot,
+  runMrScraperScrapeBrand,
+  runMrScraperScrapeJson,
+  runMrScraperScrapeMarkdown,
   runMrScraperWebSearch,
 } from "./mrscraper-client.js";
 
@@ -286,6 +290,261 @@ describe("MrScraper Scrape HTML requests", () => {
     await expect(
       runMrScraperFetchHtml({ cfg: config, url: "https://example.com", ...input }),
     ).rejects.toThrow(`MrScraper fetch ${name} must`);
+    expect(request).not.toHaveBeenCalled();
+  });
+});
+
+describe("MrScraper Scrape Markdown requests", () => {
+  beforeEach(() => {
+    request.mockImplementation(async (_options, handle) =>
+      handle({
+        response: new Response("# Example\n\nHello", { headers: { "content-type": "text/markdown" } }),
+      }),
+    );
+  });
+
+  it("sends the url, maxAge 0 and the fixed values when nothing else is set", async () => {
+    const result = await runMrScraperScrapeMarkdown({ cfg: config, url: "https://example.com" });
+
+    const options = request.mock.calls[0]?.[0];
+    expect(options.url).toBe(
+      "https://api.mrscraper.com/?url=https%3A%2F%2Fexample.com&maxAge=0&markdown=true&html=false&screenshot=false&saveResult=true",
+    );
+    expect(options.init).toEqual({ headers: { "x-api-token": "test-token" } });
+    expect(options.timeoutSeconds).toBe(330);
+    expect(result).toMatchObject({
+      provider: "mrscraper",
+      operation: "scrape_markdown",
+      markdown: "UNTRUSTED(# Example\n\nHello)",
+    });
+  });
+
+  it("sends every input that is set, in the documented order, and waits timeout + 30 seconds", async () => {
+    await runMrScraperScrapeMarkdown({
+      cfg: config,
+      url: "https://example.com/docs",
+      browserRendering: true,
+      timeout: 90,
+      geoCode: "DE",
+      warmStart: false,
+      blockResources: true,
+      waitForSelector: "main",
+      maxAge: 3_600_000,
+      maxRetries: 0,
+    });
+
+    const options = request.mock.calls[0]?.[0];
+    expect(options.url).toBe(
+      "https://api.mrscraper.com/?url=https%3A%2F%2Fexample.com%2Fdocs&browserRendering=true&timeout=90&geoCode=de&warmStart=false&blockResources=true&waitForSelector=main&maxAge=3600000&maxRetries=0&markdown=true&html=false&screenshot=false&saveResult=true",
+    );
+    expect(options.timeoutSeconds).toBe(120);
+  });
+
+  it("sends only the inputs of the call, not the webFetch config", async () => {
+    const cfg = {
+      plugins: {
+        entries: {
+          mrscraper: {
+            config: {
+              apiToken: "test-token",
+              webFetch: { timeoutSeconds: 90, geoCode: "SG", blockResources: true },
+            },
+          },
+        },
+      },
+    };
+
+    await runMrScraperScrapeMarkdown({ cfg, url: "https://example.com" });
+
+    expect(request.mock.calls[0]?.[0].url).toBe(
+      "https://api.mrscraper.com/?url=https%3A%2F%2Fexample.com&maxAge=0&markdown=true&html=false&screenshot=false&saveResult=true",
+    );
+  });
+
+  it.each([
+    ["geoCode", { geoCode: "gbr" }],
+    ["timeout", { timeout: 331 }],
+    ["url", { url: "example.com/docs" }],
+  ])("rejects an invalid %s before calling the API", async (name, input) => {
+    await expect(
+      runMrScraperScrapeMarkdown({ cfg: config, url: "https://example.com", ...input }),
+    ).rejects.toThrow(`MrScraper Scrape Markdown ${name} must`);
+    expect(request).not.toHaveBeenCalled();
+  });
+});
+
+describe("MrScraper Get Screenshot requests", () => {
+  beforeEach(() => {
+    request.mockImplementation(async (_options, handle) =>
+      handle({ response: Response.json({ screenshot: "iVBORw0KGgoAAAANSUhEUg==" }) }),
+    );
+  });
+
+  it("asks for a full-page screenshot with maxAge 0 and the fixed values when nothing else is set", async () => {
+    const result = await runMrScraperGetScreenshot({ cfg: config, url: "https://example.com" });
+
+    const options = request.mock.calls[0]?.[0];
+    expect(options.url).toBe(
+      "https://api.mrscraper.com/?url=https%3A%2F%2Fexample.com&screenshot=full&maxAge=0&browserRendering=true&html=false&markdown=false&saveResult=true",
+    );
+    expect(options.init).toEqual({ headers: { "x-api-token": "test-token" } });
+    expect(options.timeoutSeconds).toBe(330);
+    expect(readResponseText).toHaveBeenCalledWith(expect.any(Response), { maxBytes: 25_000_000 });
+    expect(result).toMatchObject({
+      provider: "mrscraper",
+      operation: "get_screenshot",
+      screenshot: { data: "iVBORw0KGgoAAAANSUhEUg==", mimeType: "image/png" },
+    });
+  });
+
+  it("sends every input that is set, in the documented order, and waits timeout + 30 seconds", async () => {
+    await runMrScraperGetScreenshot({
+      cfg: config,
+      url: "https://example.com",
+      screenshot: "1280x800-75",
+      timeout: 60,
+      geoCode: "GB",
+      waitForSelector: "#hero",
+      maxAge: 0,
+      maxRetries: 3,
+    });
+
+    const options = request.mock.calls[0]?.[0];
+    expect(options.url).toBe(
+      "https://api.mrscraper.com/?url=https%3A%2F%2Fexample.com&screenshot=1280x800-75&timeout=60&geoCode=gb&waitForSelector=%23hero&maxAge=0&maxRetries=3&browserRendering=true&html=false&markdown=false&saveResult=true",
+    );
+    expect(options.timeoutSeconds).toBe(90);
+  });
+
+  it.each(["4000x800", "1280x800-301", "page"])(
+    "rejects the screenshot area %s before calling the API",
+    async (screenshot) => {
+      await expect(
+        runMrScraperGetScreenshot({ cfg: config, url: "https://example.com", screenshot }),
+      ).rejects.toThrow("MrScraper Get Screenshot screenshot must be full, top, or <width>x<height>");
+      expect(request).not.toHaveBeenCalled();
+    },
+  );
+
+  it("reports a response without a screenshot", async () => {
+    request.mockImplementation(async (_options, handle) => handle({ response: Response.json({}) }));
+
+    await expect(
+      runMrScraperGetScreenshot({ cfg: config, url: "https://example.com" }),
+    ).rejects.toThrow("MrScraper Get Screenshot response has no screenshot.");
+  });
+});
+
+describe("MrScraper Scrape Brand requests", () => {
+  it("sends only the url, with action=brand-scraping and bundle=none, and waits 120 seconds", async () => {
+    request.mockImplementation(async (_options, handle) =>
+      handle({ response: Response.json({ data: { brand: { colors: ["#111111"] } } }) }),
+    );
+
+    const result = await runMrScraperScrapeBrand({ cfg: config, url: "https://mrscraper.com" });
+
+    const options = request.mock.calls[0]?.[0];
+    expect(options.url).toBe(
+      "https://api.mrscraper.com/?action=brand-scraping&url=https%3A%2F%2Fmrscraper.com&bundle=none",
+    );
+    expect(options.init).toEqual({ headers: { "x-api-token": "test-token" } });
+    expect(options.timeoutSeconds).toBe(120);
+    expect(result).toMatchObject({
+      provider: "mrscraper",
+      operation: "scrape_brand",
+      response: 'UNTRUSTED({"data":{"brand":{"colors":["#111111"]}}})',
+    });
+  });
+
+  it("rejects a url without a protocol before calling the API", async () => {
+    await expect(runMrScraperScrapeBrand({ cfg: config, url: "mrscraper.com" })).rejects.toThrow(
+      "MrScraper Scrape Brand url must be an absolute HTTP or HTTPS URL",
+    );
+    expect(request).not.toHaveBeenCalled();
+  });
+});
+
+describe("MrScraper Scrape JSON requests", () => {
+  const defaultQuery = "html=true&screenshot=false&maxAge=0&agent=general&saveResult=true";
+
+  it("sends html true, screenshot false, maxAge 0 and the fixed values when nothing else is set", async () => {
+    request.mockImplementation(async (_options, handle) =>
+      handle({
+        response: Response.json({ data: { title: "Example Domain" }, html: "<html></html>" }),
+      }),
+    );
+
+    const result = await runMrScraperScrapeJson({ cfg: config, url: "https://example.com" });
+
+    const options = request.mock.calls[0]?.[0];
+    expect(options.url).toBe(`https://api.mrscraper.com/?url=https%3A%2F%2Fexample.com&${defaultQuery}`);
+    expect(options.init).toEqual({ headers: { "x-api-token": "test-token" } });
+    expect(options.timeoutSeconds).toBe(330);
+    expect(result).toMatchObject({
+      provider: "mrscraper",
+      operation: "scrape_json",
+      response: 'UNTRUSTED({"data":{"title":"Example Domain"},"html":"<html></html>"})',
+    });
+    expect(result).not.toHaveProperty("screenshot");
+  });
+
+  it("sends every input that is set, in the documented order, and returns the screenshot", async () => {
+    request.mockImplementation(async (_options, handle) =>
+      handle({ response: Response.json({ data: { price: "$10" }, screenshot: "/9j/4AAQSkZJRg==" }) }),
+    );
+
+    const result = await runMrScraperScrapeJson({
+      cfg: config,
+      url: "https://example.com/item",
+      prompt: "title and price",
+      html: false,
+      screenshot: true,
+      browserRendering: true,
+      waitForSelector: ".price",
+      warmStart: true,
+      blockResources: false,
+      timeout: 200,
+      geoCode: "SG",
+      maxAge: 60_000,
+      maxRetries: 2,
+    });
+
+    const options = request.mock.calls[0]?.[0];
+    expect(options.url).toBe(
+      "https://api.mrscraper.com/?url=https%3A%2F%2Fexample.com%2Fitem&prompt=title+and+price&html=false&screenshot=true&browserRendering=true&waitForSelector=.price&warmStart=true&blockResources=false&timeout=200&geoCode=sg&maxAge=60000&maxRetries=2&agent=general&saveResult=true",
+    );
+    expect(options.timeoutSeconds).toBe(230);
+    expect(readResponseText).toHaveBeenCalledWith(expect.any(Response), { maxBytes: 25_000_000 });
+    expect(result.screenshot).toEqual({ data: "/9j/4AAQSkZJRg==", mimeType: "image/jpeg" });
+    expect(result.response).toBe('UNTRUSTED({"data":{"price":"$10"}})');
+  });
+
+  it("keeps GET up to 8,000 URL characters and sends url, prompt and agent in a POST body above", async () => {
+    request.mockImplementation(async (_options, handle) => handle({ response: Response.json({ data: {} }) }));
+    const emptyPromptUrl = `https://api.mrscraper.com/?url=https%3A%2F%2Fexample.com&prompt=&${defaultQuery}`;
+    const fitting = "x".repeat(8_000 - emptyPromptUrl.length);
+    const longer = `${fitting}x`;
+
+    await runMrScraperScrapeJson({ cfg: config, url: "https://example.com", prompt: fitting });
+    await runMrScraperScrapeJson({ cfg: config, url: "https://example.com", prompt: longer });
+
+    const [get, post] = request.mock.calls.map(([options]) => options);
+    expect(get.url).toHaveLength(8_000);
+    expect(get.init).toEqual({ headers: { "x-api-token": "test-token" } });
+    expect(post.url).toBe(
+      "https://api.mrscraper.com/?html=true&screenshot=false&maxAge=0&saveResult=true",
+    );
+    expect(post.init).toEqual({
+      method: "POST",
+      headers: { "content-type": "application/json", "x-api-token": "test-token" },
+      body: JSON.stringify({ url: "https://example.com", prompt: longer, agent: "general" }),
+    });
+  });
+
+  it("rejects a blank prompt before calling the API", async () => {
+    await expect(
+      runMrScraperScrapeJson({ cfg: config, url: "https://example.com", prompt: "   " }),
+    ).rejects.toThrow("MrScraper Scrape JSON prompt must not be empty.");
     expect(request).not.toHaveBeenCalled();
   });
 });
